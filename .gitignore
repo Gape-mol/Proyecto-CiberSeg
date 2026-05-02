@@ -1,0 +1,39 @@
+# =============================================================
+# .gitignore del monorepo
+# =============================================================
+
+# Variables de entorno — NUNCA commitear
+.env
+*.env.local
+
+# Repos clonados y reportes generados — pueden ser GBs
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+htmlcov/
+.coverage
+
+# CodeQL databases — muy pesadas
+*-codeql-db/
+*.sarif
+
+# Node (futuro frontend)
+node_modules/
+.next/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode (mantener .devcontainer/ en repo, ignorar settings personales)
+.vscode/settings.json
+.vscode/launch.json

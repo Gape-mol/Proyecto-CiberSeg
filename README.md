@@ -1,7 +1,7 @@
 # GitHub Organization Miner
 
 Primer módulo del **Security Analysis Pipeline**. Extrae todos los repositorios
-de una organización GitHub, persiste su metadata en PostgreSQL y los clona
+de una organización GitHub, persiste su metadata en un dataset JSON y los clona
 localmente para que los analizadores (Gitleaks, Grype, CodeQL) puedan operar.
 
 ## Arquitectura del pipeline completo
@@ -10,17 +10,17 @@ localmente para que los analizadores (Gitleaks, Grype, CodeQL) puedan operar.
 ┌─────────────────────────────────────────────────────────────┐
 │                   Security Pipeline                         │
 │                                                             │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐              │
-│  │  GitHub  │───▶│  Miner   │───▶│  /data/  │             │
-│  │   API    │    │ (este)   │    │   repos/ │             │
-│  └──────────┘    └─────┬────┘    └────┬─────┘              │
-│                        │              │                     │
-│                        ▼              ▼                     │
-│                  ┌──────────┐   ┌──────────────────────┐   │
-│                  │ PostgreSQL│   │    Analizadores       │   │
-│                  │    DB    │◀──│  Gitleaks │ Grype     │   │
-│                  │          │   │  SBOM     │ CodeQL    │   │
-│                  └────┬─────┘   └──────────────────────┘   │
+│  ┌──────────┐    ┌──────────┐     ┌──────────┐              │
+│  │  GitHub  │───▶│  Miner   │───▶│  /data/  │              │
+│  │   API    │    │ (este)   │     │   repos/ │              │
+│  └──────────┘    └─────┬────┘     └────┬─────┘              │
+│                        │               │                    │
+│                        ▼               ▼                    │
+│                  ┌──────────┐   ┌──────────────────────┐    │
+│                  │ Dataset  │   │    Analizadores      │    │
+│                  │   JSON   │◀──│  Gitleaks │ Grype    │   │
+│                  │          │   │  SBOM     │ CodeQL   │    │
+│                  └────┬─────┘   └──────────────────────┘    │
 │                       │                                     │
 │                       ▼                                     │
 │                  ┌──────────┐                               │
@@ -57,7 +57,7 @@ Todas las opciones se configuran por variables de entorno (ver `config/.env.exam
 |---|---|---|
 | `GITHUB_TOKEN` | PAT de GitHub (scopes: `read:org`, `repo`) | **requerido** |
 | `GITHUB_ORG` | Slug de la organización | **requerido** |
-| `DATABASE_URL` | DSN de PostgreSQL | `postgresql://user:pass@localhost/secpipeline` |
+| `DB_PATH` | Ruta al dataset JSON | `/data/secpipeline.json` |
 | `CLONE_ROOT` | Directorio raíz para repos | `/data/repos` |
 | `CLONE_WORKERS` | Repos en paralelo | `5` |
 | `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
@@ -88,6 +88,9 @@ python -m miner --org otra-org --workers 10
 # Logging detallado
 python -m miner -v
 
+# Modo continuo (repite el pipeline cada 10 minutos)
+python -m miner --continuous --interval 600
+
 # Guardar resumen en JSON (útil para CI/CD)
 python -m miner --output-json /tmp/miner-summary.json
 ```
@@ -95,14 +98,11 @@ python -m miner --output-json /tmp/miner-summary.json
 ## Con Docker
 
 ```bash
-# Levantar solo la DB
-docker compose up db
-
 # Ejecutar el miner una vez
 docker compose run --rm miner
 
-# Ver logs
-docker compose logs -f miner
+# Levantar el visualizer estático
+docker compose up visualizer
 ```
 
 ## Estructura del proyecto
@@ -113,10 +113,12 @@ github-miner/
 │   ├── __init__.py
 │   ├── __main__.py     # Entrypoint CLI
 │   ├── miner.py        # Lógica principal: GitHubClient + GitHubMiner
-│   ├── db.py           # Capa de acceso a PostgreSQL
+│   ├── db.py           # Persistencia en JSON
 │   └── models.py       # Dataclasses: Organization, Repository
-├── db/
-│   └── schema.sql      # Schema completo del pipeline (todas las tablas)
+├── analyzers/
+│   └── vulnerability_analysis.ipynb
+├── data-visualizer/
+│   └── index.html
 ├── config/
 │   └── .env.example    # Plantilla de variables de entorno
 ├── tests/

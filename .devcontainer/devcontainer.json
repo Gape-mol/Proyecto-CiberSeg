@@ -1,0 +1,78 @@
+{
+  "name": "Security Pipeline",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+
+  // Monta el workspace completo
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+
+  // Volúmenes persistentes: repos, reportes y dataset no se pierden entre sesiones
+  "mounts": [
+    "source=secpipeline-repos,target=/data/repos,type=volume",
+    "source=secpipeline-reports,target=/data/reports,type=volume",
+    "source=secpipeline-data,target=/data,type=volume",
+    // Cache de pip entre rebuilds del container
+    "source=secpipeline-pipcache,target=/root/.cache/pip,type=volume"
+  ],
+
+  // Servicios del workspace via docker-compose
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "../docker-compose.override.yml"
+  ],
+  "service": "devcontainer",
+  "runServices": ["devcontainer"],
+
+  "features": {
+    // Git dentro del container
+    "ghcr.io/devcontainers/features/git:1": {},
+    // GitHub CLI (útil para testear auth)
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Python
+        "ms-python.python",
+        "ms-python.mypy-type-checker",
+        "charliermarsh.ruff",
+        // Docker / devcontainer
+        "ms-azuretools.vscode-docker",
+        "ms-vscode-remote.remote-containers",
+        // General
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.formatting.provider": "none",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": true,
+            "source.organizeImports.ruff": true
+          }
+        },
+        "mypy-type-checker.args": ["--strict"],
+        "editor.rulers": [100]
+      }
+    }
+  },
+
+  // Corre después de crear el container
+  "postCreateCommand": "bash /workspace/.devcontainer/post-create.sh",
+
+  // Reenvío de puertos: visualizer estático
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": { "label": "Visualizer", "onAutoForward": "notify" }
+  },
+
+  "remoteUser": "vscode"
+}

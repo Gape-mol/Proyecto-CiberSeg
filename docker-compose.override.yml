@@ -1,0 +1,38 @@
+# =============================================================
+# docker-compose.override.yml
+# Overrides para desarrollo local con devcontainer.
+# Este archivo NO se usa en CI/producción.
+# =============================================================
+
+version: "3.9"
+
+services:
+
+  # Servicio "fantasma" que el devcontainer usa como base
+  # El container real lo levanta VS Code, esto solo define la config
+  devcontainer:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - .:/workspace:cached
+      - secpipeline-repos:/data/repos
+      - secpipeline-reports:/data/reports
+      - secpipeline-data:/data
+      - secpipeline-pipcache:/root/.cache/pip
+    environment:
+      - DB_PATH=/data/secpipeline.json
+      - CLONE_ROOT=/data/repos
+    env_file:
+      - .env
+    # El devcontainer se mantiene vivo con sleep infinity
+    # VS Code lo usa para exec-ar comandos adentro
+    command: sleep infinity
+    networks:
+      - default
+
+volumes:
+  secpipeline-repos:
+  secpipeline-reports:
+  secpipeline-data:
+  secpipeline-pipcache:

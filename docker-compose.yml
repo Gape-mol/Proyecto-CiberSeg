@@ -1,0 +1,61 @@
+version: "3.9"
+
+# ============================================================
+# Security Pipeline — Infraestructura completa
+# ============================================================
+# Servicios:
+#   miner      → GitHub Miner (este módulo)
+#   visualizer → viewer estático opcional
+#
+# Uso:
+#   docker compose run --rm miner    # Ejecutar el miner una vez
+#   docker compose up visualizer     # Levantar viewer estático
+
+services:
+
+  # ----------------------------------------------------------
+  # GitHub Miner
+  # ----------------------------------------------------------
+  miner:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_ORG: ${GITHUB_ORG}
+      DB_PATH: /data/secpipeline.json
+      CLONE_ROOT: /data/repos
+      REPORTS_ROOT: /data/reports
+      CLONE_WORKERS: ${CLONE_WORKERS:-5}
+      REPO_VISIBILITY: ${REPO_VISIBILITY:-all}
+      SKIP_ARCHIVED: ${SKIP_ARCHIVED:-false}
+      CLONE_DEPTH: ${CLONE_DEPTH:-none}
+      REPO_LIMIT: ${REPO_LIMIT:-50}
+      REPO_RECENT_DAYS: ${REPO_RECENT_DAYS:-30}
+      CODEQL_WORKERS: ${CODEQL_WORKERS:-1}
+    volumes:
+      - repos_data:/data/repos      # Repos clonados (compartido con analizadores)
+      - reports_data:/data/reports  # Reportes JSON/SARIF (compartido con analizadores)
+      - dataset_data:/data          # Dataset JSON legible para analyzer/visualizer
+    restart: "no"                   # El miner corre una vez; usar scheduler externo
+
+  # ----------------------------------------------------------
+  # Visualizer estático opcional
+  # ----------------------------------------------------------
+  visualizer:
+    image: python:3.12-slim
+    working_dir: /app
+    command: python -m http.server 4173
+    volumes:
+      - ./data-visualizer:/app:ro
+      - dataset_data:/data:ro
+    ports:
+      - "4173:4173"
+
+volumes:
+  repos_data:
+    driver: local
+  reports_data:
+    driver: local
+  dataset_data:
+    driver: local

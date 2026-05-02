@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "github-miner"
+version = "0.1.0"
+description = "GitHub Organization Miner — parte del pipeline de análisis de seguridad"
+requires-python = ">=3.11"
+
+dependencies = [
+    "httpx>=0.27",
+    "tenacity>=8.3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+    "mypy>=1.10",
+    "ruff>=0.4",
+    "respx>=0.21",
+]
+
+[project.scripts]
+# python -m miner  ó  github-miner  → ambos funcionan
+github-miner = "miner.__main__:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["miner"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

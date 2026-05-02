@@ -1,0 +1,48 @@
+FROM python:3.12-slim-bookworm
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+ARG GITLEAKS_VERSION=8.18.4
+ARG SYFT_VERSION=1.4.1
+ARG GRYPE_VERSION=0.78.0
+ARG CODEQL_VERSION=2.17.3
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    unzip \
+    tar \
+    default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSfL \
+    "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+    | tar -xz -C /usr/local/bin gitleaks \
+    && chmod +x /usr/local/bin/gitleaks
+
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+    | sh -s -- -b /usr/local/bin "v${SYFT_VERSION}"
+
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+    | sh -s -- -b /usr/local/bin "v${GRYPE_VERSION}"
+
+RUN mkdir -p /opt/codeql \
+    && curl -sSfL \
+    "https://github.com/github/codeql-action/releases/download/codeql-bundle-v${CODEQL_VERSION}/codeql-bundle-linux64.tar.gz" \
+    | tar -xz -C /opt/codeql --strip-components=1 \
+    && ln -s /opt/codeql/codeql /usr/local/bin/codeql
+
+RUN mkdir -p /data/repos /data/reports
+
+WORKDIR /app
+
+COPY miner/pyproject.toml ./miner/
+COPY miner/miner/ ./miner/miner/
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir ./miner
+
+RUN git config --system --add safe.directory '/data/repos/*'
+
+CMD ["python", "-m", "miner"]
