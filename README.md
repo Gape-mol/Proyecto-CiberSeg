@@ -1,89 +1,162 @@
-# GitHub Organization Miner
+# Security Analysis Pipeline
 
-Primer módulo del **Security Analysis Pipeline**. Extrae todos los repositorios
-de una organización GitHub, persiste su metadata en un dataset JSON y los clona
-localmente para que los analizadores (Gitleaks, Grype, CodeQL) puedan operar.
+Pipeline de análisis de vulnerabilidades sobre organizaciones del dataset AIDev.
+El sistema extrae repositorios, los analiza con herramientas de seguridad y persiste
+los resultados en un dataset JSON estructurado.
 
-## Arquitectura del pipeline completo
+## Estado actual del proyecto
+
+| Componente  | Estado | Descripción |
+|-------------|--------|-------------|
+| **Miner**   | ✅ Implementado | Clona repos, ejecuta CodeQL, Syft, Grype y Gitleaks |
+| **Analyzer**| 🚧 Pendiente | Notebooks de análisis exploratorio |
+| **Visualizer** | 🚧 Pendiente | Dashboard web de resultados |
+
+## Arquitectura
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   Security Pipeline                         │
-│                                                             │
-│  ┌──────────┐    ┌──────────┐     ┌──────────┐              │
-│  │  GitHub  │───▶│  Miner   │───▶│  /data/  │              │
-│  │   API    │    │ (este)   │     │   repos/ │              │
-│  └──────────┘    └─────┬────┘     └────┬─────┘              │
-│                        │               │                    │
-│                        ▼               ▼                    │
-│                  ┌──────────┐   ┌──────────────────────┐    │
-│                  │ Dataset  │   │    Analizadores      │    │
-│                  │   JSON   │◀──│  Gitleaks │ Grype    │   │
-│                  │          │   │  SBOM     │ CodeQL   │    │
-│                  └────┬─────┘   └──────────────────────┘    │
-│                       │                                     │
-│                       ▼                                     │
-│                  ┌──────────┐                               │
-│                  │ Frontend │                               │
-│                  │Dashboard │                               │
-│                  └──────────┘                               │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Security Pipeline                          │
+│                                                                 │
+│  ┌──────────┐    ┌──────────────┐    ┌────────────────────────┐ │
+│  │  GitHub  │───▶│    Miner     │───▶│   /data/               │ │
+│  │   API    │    │              │    │   ├── repos/            │ │
+│  └──────────┘    │  ┌────────┐  │    │   ├── reports/         │ │
+│                  │  │Gitleaks│  │    │   └── secpipeline.json  │ │
+│                  │  │  Syft  │  │    └────────────┬───────────┘ │
+│                  │  │  Grype │  │                 │             │
+│                  │  │ CodeQL │  │                 ▼             │
+│                  │  └────────┘  │    ┌────────────────────────┐ │
+│                  └──────────────┘    │   Analyzer (notebooks) │ │
+│                                      └────────────┬───────────┘ │
+│                                                   │             │
+│                                                   ▼             │
+│                                      ┌────────────────────────┐ │
+│                                      │  Visualizer (dashboard) │ │
+│                                      └────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Instalación
+## Inicio rápido
+
+### Opción A — Dev Container (recomendado)
+
+Requiere [VS Code](https://code.visualstudio.com/) con la extensión
+[Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+y Docker Desktop.
 
 ```bash
-# Clonar el repo del pipeline
-git clone https://github.com/tu-org/security-pipeline
-cd security-pipeline/github-miner
+# 1. Clonar el repositorio
+git clone <url-del-repo>
+cd Proyecto-CiberSeg
 
-# Crear entorno virtual
+# 2. Abrir en VS Code y abrir en Dev Container
+code .
+# VS Code detecta automáticamente .devcontainer/ y ofrece "Reopen in Container"
+```
+
+El container instala automáticamente todas las dependencias (Python, CodeQL, Syft, Grype,
+Gitleaks) y ejecuta `post-create.sh`.
+
+```bash
+# 3. Dentro del container: configurar credenciales
+nano /workspace/.env
+#   GITHUB_TOKEN=ghp_tu_token_aqui
+#   GITHUB_ORG=nombre-de-la-org-aidev
+
+# 4. Ejecutar el miner
+cd /workspace
+python -m miner
+```
+
+### Opción B — Docker Compose
+
+```bash
+# 1. Clonar el repositorio
+git clone <url-del-repo>
+cd Proyecto-CiberSeg
+
+# 2. Configurar credenciales
+cp .env.example .env
+# Editar .env con GITHUB_TOKEN y GITHUB_ORG
+
+# 3. Ejecutar el miner
+docker compose run --rm miner
+
+# 4. (Opcional) Levantar el visualizer
+docker compose up visualizer
+# Acceder en http://localhost:4173
+```
+
+### Opción C — Local (requiere herramientas instaladas)
+
+Requiere Python ≥ 3.11, git, [Gitleaks](https://github.com/gitleaks/gitleaks),
+[Syft](https://github.com/anchore/syft), [Grype](https://github.com/anchore/grype)
+y [CodeQL CLI](https://github.com/github/codeql-action/releases) en el `PATH`.
+
+```bash
+# 1. Clonar el repositorio
+git clone <url-del-repo>
+cd Proyecto-CiberSeg
+
+# 2. Instalar dependencias Python
+cd miner
 python -m venv .venv
 source .venv/bin/activate
-
-# Instalar dependencias
 pip install -e ".[dev]"
+cd ..
 
-# Configurar variables de entorno
-cp config/.env.example .env
-# Editar .env con tu GITHUB_TOKEN y GITHUB_ORG
+# 3. Configurar credenciales
+cp .env.example .env
+# Editar .env con GITHUB_TOKEN y GITHUB_ORG
+
+# 4. Ejecutar el miner
+python -m miner
 ```
 
 ## Configuración
 
-Todas las opciones se configuran por variables de entorno (ver `config/.env.example`):
+Las variables se definen en `.env` (copiado desde `.env.example`):
 
 | Variable | Descripción | Default |
 |---|---|---|
 | `GITHUB_TOKEN` | PAT de GitHub (scopes: `read:org`, `repo`) | **requerido** |
-| `GITHUB_ORG` | Slug de la organización | **requerido** |
+| `GITHUB_ORG` | Slug de la organización del dataset AIDev | **requerido** |
 | `DB_PATH` | Ruta al dataset JSON | `/data/secpipeline.json` |
-| `CLONE_ROOT` | Directorio raíz para repos | `/data/repos` |
-| `CLONE_WORKERS` | Repos en paralelo | `5` |
+| `CLONE_ROOT` | Directorio raíz para repos clonados | `/data/repos` |
+| `REPORTS_ROOT` | Directorio para reportes JSON/SARIF | `/data/reports` |
+| `CLONE_WORKERS` | Repos clonados en paralelo | `5` |
+| `CODEQL_WORKERS` | Análisis CodeQL en paralelo | `1` |
 | `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
 | `SKIP_ARCHIVED` | Ignorar repos archivados | `false` |
 | `CLONE_DEPTH` | Profundidad del clone (`none` = completo) | `none` |
-| `CLONE_TIMEOUT` | Timeout por repo en segundos | `600` |
+| `REPO_LIMIT` | Máximo de repos a procesar | `50` |
+| `REPO_RECENT_DAYS` | Solo repos con actividad en los últimos N días | `30` |
 
-### ⚠️ Nota sobre `CLONE_DEPTH`
+### Token de GitHub
 
-- **`none` (recomendado)**: Historia completa. Necesario para que Gitleaks detecte secretos en commits históricos.
-- **`1`**: Solo el último commit. Más rápido, suficiente si solo usás SBOM/CodeQL.
+El token necesita los siguientes scopes:
 
-## Uso
+| Tipo de repos | Scope necesario |
+|---|---|
+| Solo públicos | `public_repo` |
+| Privados | `repo` |
+| Leer organización | `read:org` |
+
+## Uso del Miner
 
 ```bash
-# Ejecutar el miner (lee config de .env)
-python -m miner
-
-# Ver opciones
-python -m miner --help
-
-# Listar repos sin clonar (dry-run)
+# Listar repos sin clonar (modo preview)
 python -m miner --dry-run
 
-# Override de org y workers por CLI
-python -m miner --org otra-org --workers 10
+# Ejecutar el pipeline completo (lee config de .env)
+python -m miner
+
+# Override de org y workers desde CLI
+python -m miner --org nombre-org --workers 10
+
+# Limitar cantidad de repos
+python -m miner --limit 10
 
 # Logging detallado
 python -m miner -v
@@ -91,68 +164,68 @@ python -m miner -v
 # Modo continuo (repite el pipeline cada 10 minutos)
 python -m miner --continuous --interval 600
 
-# Guardar resumen en JSON (útil para CI/CD)
-python -m miner --output-json /tmp/miner-summary.json
-```
-
-## Con Docker
-
-```bash
-# Ejecutar el miner una vez
-docker compose run --rm miner
-
-# Levantar el visualizer estático
-docker compose up visualizer
+# Guardar resumen en JSON
+python -m miner --output-json /tmp/resumen.json
 ```
 
 ## Estructura del proyecto
 
 ```
-github-miner/
+Proyecto-CiberSeg/
+├── .devcontainer/
+│   ├── Dockerfile           # Imagen del devcontainer con todas las herramientas
+│   ├── devcontainer.json    # Configuración VS Code Dev Container
+│   └── post-create.sh       # Setup automático al crear el container
 ├── miner/
-│   ├── __init__.py
-│   ├── __main__.py     # Entrypoint CLI
-│   ├── miner.py        # Lógica principal: GitHubClient + GitHubMiner
-│   ├── db.py           # Persistencia en JSON
-│   └── models.py       # Dataclasses: Organization, Repository
-├── analyzers/
-│   └── vulnerability_analysis.ipynb
-├── data-visualizer/
-│   └── index.html
-├── config/
-│   └── .env.example    # Plantilla de variables de entorno
-├── tests/
-│   └── test_miner.py   # Tests con mocks (sin llamadas reales a GitHub)
-├── docker-compose.yml  # Infraestructura del pipeline completo
+│   ├── miner/
+│   │   ├── __main__.py      # CLI entrypoint
+│   │   ├── miner.py         # GitHubClient + GitHubMiner (extracción de repos)
+│   │   ├── pipeline.py      # Pipeline multi-etapa: clone→gitleaks→sbom→grype→codeql
+│   │   ├── db.py            # Persistencia JSON (dataset estructurado)
+│   │   └── models.py        # Dataclasses: Organization, Repository
+│   ├── tests/
+│   │   ├── test_miner.py
+│   │   ├── test_db.py
+│   │   └── test_pipeline.py
+│   └── pyproject.toml
+├── analyzers/               # Notebooks de análisis (pendiente)
+├── data-visualizer/         # Dashboard web (pendiente)
+├── docker-compose.yml
 ├── Dockerfile.miner
-└── pyproject.toml
+├── .env.example             # Plantilla de variables de entorno
+└── README.md
 ```
+
+## Dataset de salida
+
+El miner produce `/data/secpipeline.json` con las siguientes colecciones:
+
+| Colección | Contenido |
+|---|---|
+| `organizations` | Metadata de la organización |
+| `repositories` | Repos seleccionados y su estado |
+| `codeql_findings` | Vulnerabilidades estáticas (tipo, ubicación, severidad) |
+| `grype_findings` | CVEs en dependencias (ID, paquete, severidad) |
+| `sbom_components` | Componentes del SBOM generado por Syft |
+| `gitleaks_findings` | Secretos detectados en el historial de commits |
+| `pipeline_runs` | Historial de ejecuciones del pipeline |
 
 ## Tests
 
 ```bash
+# Desde el directorio raíz del proyecto
+cd miner
 pytest tests/ -v
 
-# Con coverage
+# Con reporte de cobertura
 pytest tests/ -v --cov=miner --cov-report=term-missing
 ```
 
-## Permisos de GitHub
+## Herramientas de análisis incluidas
 
-El token necesita los siguientes scopes según el tipo de repos:
-
-| Repos | Scope necesario |
-|---|---|
-| Solo públicos | `public_repo` |
-| Privados | `repo` |
-| Leer organización | `read:org` |
-
-**Recomendación para producción**: usar una **GitHub App** en lugar de un PAT personal. Permite permisos más granulares y no expira.
-
-## Próximos módulos
-
-1. **Gitleaks Analyzer** — detecta secretos en el historial de commits
-2. **SBOM Generator** — genera Software Bill of Materials con Syft
-3. **Grype Scanner** — busca CVEs en las dependencias del SBOM
-4. **CodeQL Analyzer** — análisis estático de código fuente
-5. **Frontend Dashboard** — visualización de todos los hallazgos
+| Herramienta | Versión | Propósito |
+|---|---|---|
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | v8.18.4 | Detección de secretos en commits |
+| [Syft](https://github.com/anchore/syft) | v1.4.1 | Generación de SBOM (CycloneDX) |
+| [Grype](https://github.com/anchore/grype) | v0.78.0 | Detección de CVEs en dependencias |
+| [CodeQL](https://codeql.github.com/) | v2.17.3 | Análisis estático de código fuente |
