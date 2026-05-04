@@ -127,7 +127,7 @@ class Database:
 
     async def connect(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._db_path.exists():
+        if self._db_path.exists() and self._db_path.stat().st_size > 0:
             self._store = self._load_store()
         else:
             self._store = _base_store()

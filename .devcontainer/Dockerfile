@@ -2,7 +2,7 @@
 # Security Pipeline — Devcontainer
 # =============================================================
 # Imagen base: Python 3.12 slim (Debian Bookworm)
-# Incluye: git, gitleaks, syft, grype, codeql
+# Incluye: git, gitleaks, syft, grype, codeql, node.js, python
 # =============================================================
 
 FROM python:3.12-slim-bookworm
@@ -34,6 +34,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash-completion \
     jq \
     && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------------------
+# Node.js 20 LTS — runtime JavaScript (visualizer + tooling)
+# https://nodejs.org
+# -------------------------------------------------------------
+ARG NODE_MAJOR=20
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npm --version
 
 # -------------------------------------------------------------
 # Usuario no-root (recomendado por devcontainer spec)
@@ -104,6 +115,10 @@ RUN pip install --no-cache-dir -r ./analyzers/requirements.txt
 # -------------------------------------------------------------
 # Configuración final
 # -------------------------------------------------------------
+
+# PATH: agregar .local/bin del usuario vscode para que pip install --user
+# quede accesible (evita el WARNING de github-miner no encontrado en PATH)
+ENV PATH="/home/vscode/.local/bin:${PATH}"
 
 # Git: marcar /data como directorio seguro (repos clonados por root o bind mounts)
 RUN git config --system --add safe.directory '/data/repos/*' \

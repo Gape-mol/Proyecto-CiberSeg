@@ -1,16 +1,16 @@
 # Security Analysis Pipeline
 
 Pipeline de análisis de vulnerabilidades sobre organizaciones del dataset AIDev.
-El sistema extrae repositorios, los analiza con herramientas de seguridad y persiste
+El sistema extrae repositorios, los analiza con cuatro herramientas de seguridad y persiste
 los resultados en un dataset JSON estructurado.
 
 ## Estado actual del proyecto
 
 | Componente  | Estado | Descripción |
 |-------------|--------|-------------|
-| **Miner**   | ✅ Implementado | Clona repos, ejecuta CodeQL, Syft, Grype y Gitleaks |
-| **Analyzer**| 🚧 Pendiente | Notebooks de análisis exploratorio |
-| **Visualizer** | 🚧 Pendiente | Dashboard web de resultados |
+| **Miner**      | ✅ Implementado | Pipeline async: clone → Gitleaks → Syft → Grype → CodeQL |
+| **Analyzer**   | ✅ Implementado | 5 notebooks: overview, CodeQL, Grype, SBOM, Gitleaks |
+| **Visualizer** | ✅ Implementado | Dashboard HTML/JS con auto-refresh cada 2 s |
 
 ## Arquitectura
 
@@ -67,6 +67,10 @@ nano /workspace/.env
 # 4. Ejecutar el miner
 cd /workspace
 python -m miner
+
+# 5. (Opcional) Levantar el visualizer — usa serve.py para proxear /data/
+python /workspace/data-visualizer/serve.py
+# Acceder en http://localhost:4173
 ```
 
 ### Opción B — Docker Compose
@@ -87,6 +91,10 @@ docker compose run --rm miner
 docker compose up visualizer
 # Acceder en http://localhost:4173
 ```
+
+> En Docker Compose el visualizer usa `python -m http.server` directo: el volumen
+> `dataset_data` se monta en `/app/data/`, dentro del directorio servido, por lo que
+> no necesita el script `serve.py`.
 
 ### Opción C — Local (requiere herramientas instaladas)
 
@@ -116,26 +124,30 @@ python -m miner
 
 ## Configuración
 
-Las variables se definen en `.env` (copiado desde `.env.example`):
+Las variables se definen en `.env` (copiado desde `.env.example`).
+Solo `GITHUB_TOKEN` y `GITHUB_ORG` son obligatorias; el resto tiene defaults razonables.
 
 | Variable | Descripción | Default |
 |---|---|---|
-| `GITHUB_TOKEN` | PAT de GitHub (scopes: `read:org`, `repo`) | **requerido** |
+| `GITHUB_TOKEN` | PAT de GitHub (o `GH_TOKEN`) | **requerido** |
 | `GITHUB_ORG` | Slug de la organización del dataset AIDev | **requerido** |
 | `DB_PATH` | Ruta al dataset JSON | `/data/secpipeline.json` |
 | `CLONE_ROOT` | Directorio raíz para repos clonados | `/data/repos` |
 | `REPORTS_ROOT` | Directorio para reportes JSON/SARIF | `/data/reports` |
 | `CLONE_WORKERS` | Repos clonados en paralelo | `5` |
-| `CODEQL_WORKERS` | Análisis CodeQL en paralelo | `1` |
-| `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
-| `SKIP_ARCHIVED` | Ignorar repos archivados | `false` |
-| `CLONE_DEPTH` | Profundidad del clone (`none` = completo) | `none` |
+| `GITLEAKS_WORKERS` | Workers de Gitleaks en paralelo | `2` |
+| `SBOM_WORKERS` | Workers de Syft en paralelo | `2` |
+| `GRYPE_WORKERS` | Workers de Grype en paralelo | `2` |
+| `CODEQL_WORKERS` | Workers de CodeQL en paralelo (CPU-intensivo) | `1` |
+| `CLONE_DEPTH` | Profundidad del clone (`none` = historial completo) | `none` |
 | `REPO_LIMIT` | Máximo de repos a procesar | `50` |
 | `REPO_RECENT_DAYS` | Solo repos con actividad en los últimos N días | `30` |
+| `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
+| `SKIP_ARCHIVED` | Ignorar repos archivados | `false` |
+| `RUN_CONTINUOUS` | Activar modo continuo (`true`/`false`) | `false` |
+| `RUN_INTERVAL_SECONDS` | Segundos entre corridas en modo continuo | `3600` |
 
 ### Token de GitHub
-
-El token necesita los siguientes scopes:
 
 | Tipo de repos | Scope necesario |
 |---|---|
@@ -166,6 +178,12 @@ python -m miner --continuous --interval 600
 
 # Guardar resumen en JSON
 python -m miner --output-json /tmp/resumen.json
+
+# Borrar todos los datos y empezar de cero
+python -m miner --reset
+
+# Borrar datos y lanzar una nueva extracción en el mismo comando
+python -m miner --reset --limit 5 -v
 ```
 
 ## Estructura del proyecto
@@ -178,7 +196,7 @@ Proyecto-CiberSeg/
 │   └── post-create.sh       # Setup automático al crear el container
 ├── miner/
 │   ├── miner/
-│   │   ├── __main__.py      # CLI entrypoint
+│   │   ├── __main__.py      # CLI entrypoint y orquestación
 │   │   ├── miner.py         # GitHubClient + GitHubMiner (extracción de repos)
 │   │   ├── pipeline.py      # Pipeline multi-etapa: clone→gitleaks→sbom→grype→codeql
 │   │   ├── db.py            # Persistencia JSON (dataset estructurado)
@@ -188,32 +206,71 @@ Proyecto-CiberSeg/
 │   │   ├── test_db.py
 │   │   └── test_pipeline.py
 │   └── pyproject.toml
-├── analyzers/               # Notebooks de análisis (pendiente)
-├── data-visualizer/         # Dashboard web (pendiente)
+├── analyzers/
+│   ├── 00_overview.ipynb    # Resumen general + puntuación de riesgo
+│   ├── 01_codeql.ipynb      # Análisis estático (reglas, CWEs, archivos)
+│   ├── 02_grype.ipynb       # CVEs en dependencias (CVSS, remediabilidad)
+│   ├── 03_sbom.ipynb        # Componentes SBOM (ecosistemas, licencias)
+│   ├── 04_gitleaks.ipynb    # Secretos expuestos (tipos, autores, timeline)
+│   └── requirements.txt
+├── data-visualizer/
+│   ├── index.html           # Dashboard HTML/JS con auto-refresh cada 2 s
+│   └── serve.py             # Servidor HTTP con proxy para /data/ (Dev Container)
 ├── docker-compose.yml
+├── docker-compose.override.yml  # Overrides para Dev Container
 ├── Dockerfile.miner
 ├── .env.example             # Plantilla de variables de entorno
-└── README.md
+├── README.md
+└── EJECUCION.md             # Guía paso a paso para correr el sistema
 ```
 
-## Dataset de salida
+## Dataset de salida (`secpipeline.json`)
 
 El miner produce `/data/secpipeline.json` con las siguientes colecciones:
 
 | Colección | Contenido |
 |---|---|
 | `organizations` | Metadata de la organización |
-| `repositories` | Repos seleccionados y su estado |
-| `codeql_findings` | Vulnerabilidades estáticas (tipo, ubicación, severidad) |
-| `grype_findings` | CVEs en dependencias (ID, paquete, severidad) |
-| `sbom_components` | Componentes del SBOM generado por Syft |
-| `gitleaks_findings` | Secretos detectados en el historial de commits |
-| `pipeline_runs` | Historial de ejecuciones del pipeline |
+| `repositories` | Repos seleccionados, rutas de clone y estado del pipeline |
+| `gitleaks_scans` | Registro de cada escaneo de Gitleaks (repo, timestamp, estado) |
+| `gitleaks_findings` | Secretos detectados (tipo, archivo, línea, autor, commit) |
+| `sbom_scans` | Registro de cada generación de SBOM con Syft |
+| `sbom_components` | Componentes del SBOM (nombre, versión, purl, licencia, ecosistema) |
+| `grype_scans` | Registro de cada escaneo de Grype |
+| `grype_findings` | CVEs en dependencias (ID, paquete, severidad, CVSS, fix) |
+| `codeql_scans` | Registro de cada análisis CodeQL (lenguaje, estado) |
+| `codeql_findings` | Vulnerabilidades estáticas (regla, CWE, archivo, línea, severidad) |
+| `pipeline_runs` | Reservado para historial de ejecuciones (actualmente sin uso) |
+
+## Decisiones de Diseño
+
+### 1. JSON como contrato de datos entre componentes
+
+Se eligió un único archivo JSON (`secpipeline.json`) como mecanismo de intercambio entre el Miner, el Analyzer y el Visualizer, en lugar de una base de datos relacional o una API. Esto elimina dependencias de infraestructura (no se necesita un servidor de base de datos) y hace que el dataset sea directamente inspeccionable, versionable y portable. El archivo se comparte entre servicios mediante un Docker volume nombrado (`dataset_data`), lo que mantiene el desacoplamiento sin acoplamiento de red.
+
+### 2. Pipeline async por etapas con workers paralelos
+
+El Miner implementa un pipeline de cinco etapas secuenciales (clone → Gitleaks → SBOM → Grype → CodeQL) donde cada etapa procesa múltiples repositorios en paralelo mediante `asyncio.Queue` y workers configurables. La secuencialidad entre etapas garantiza que Grype solo corra sobre un SBOM ya generado, y que CodeQL solo corra sobre un repo ya clonado. Esta arquitectura permite escalar cada etapa de forma independiente.
+
+### 3. Selección de repos por actividad reciente y popularidad
+
+El miner trae hasta `REPO_LIMIT × 4` repos ordenados por actividad (push reciente) y filtra por `REPO_RECENT_DAYS`. Si hay suficientes repos recientes, los ordena por estrellas; si no, completa con los más populares del resto de la org. Esto garantiza analizar repos relevantes sin consumir el límite de 50 en repos abandonados.
+
+### 4. Visualizer como HTML estático sin build
+
+El dashboard se implementó como un único `index.html` con JavaScript puro (ES6+) y Chart.js desde CDN, sin herramientas de build. En el Dev Container se sirve con `serve.py`, que actúa como proxy para las peticiones a `/data/` (los archivos de datos están en `/data`, fuera del directorio del visualizer). En Docker Compose el volumen de datos se monta directamente dentro del directorio servido, por lo que alcanza con `python -m http.server`.
+
+### 5. Gitleaks como herramienta adicional al enunciado
+
+El enunciado especifica CodeQL, Syft y Grype. Se incorporó Gitleaks porque los repositorios frecuentemente contienen secretos expuestos (tokens, API keys) que no se detectan con análisis estático ni con escaneo de dependencias. El análisis de secretos aporta una dimensión de riesgo complementaria.
+
+### 6. Puntuación de riesgo ponderada
+
+Score compuesto para comparar repositorios: `Critical×10 + High×5 + Medium×2 + Low×1 + Secreto×3`. Los pesos reflejan el impacto potencial según las escalas CVSS, con un factor fijo para secretos (no tienen severidad CVSS normalizada).
 
 ## Tests
 
 ```bash
-# Desde el directorio raíz del proyecto
 cd miner
 pytest tests/ -v
 

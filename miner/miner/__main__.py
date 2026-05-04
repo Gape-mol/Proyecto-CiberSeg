@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -14,15 +15,80 @@ from .db import Database
 from .miner import GitHubMiner, MinerConfig
 from .pipeline import Pipeline, PipelineConfig
 
+# ── ANSI helpers ───────────────────────────────────────────────────────────────
+_R  = "\033[0m"   # reset
+_B  = "\033[1m"   # bold
+_D  = "\033[2m"   # dim
+
+# Stage badge colors
+_STAGE_COLOR: dict[str, str] = {
+    "clone":    "\033[94m",   # azul claro
+    "gitleaks": "\033[91m",   # rojo claro
+    "sbom":     "\033[95m",   # magenta claro
+    "grype":    "\033[93m",   # amarillo claro
+    "codeql":   "\033[92m",   # verde claro
+}
+
+# Logger-name colors (cuando no hay stage detectado)
+_LOGGER_COLOR: dict[str, str] = {
+    "miner.cli":      "\033[97m",   # blanco brillante
+    "miner.miner":    "\033[96m",   # cian claro
+    "miner.db":       "\033[90m",   # gris oscuro
+    "miner.pipeline": "\033[97m",   # blanco brillante
+}
+
+# Level colors + símbolo
+_LEVEL_FMT: dict[str, tuple[str, str]] = {
+    "DEBUG":    ("\033[90m",  "·"),    # gris
+    "INFO":     ("\033[37m",  "→"),    # blanco
+    "WARNING":  ("\033[33m",  "⚠ "),   # amarillo
+    "ERROR":    ("\033[31m",  "✗ "),   # rojo
+    "CRITICAL": ("\033[41m",  "!! "),  # fondo rojo
+}
+
+_STAGE_RE = re.compile(r"\[(clone|gitleaks|sbom|grype|codeql)\]", re.IGNORECASE)
+
+
+class ColorFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        msg = record.getMessage()
+
+        # Detectar stage desde el mensaje
+        m = _STAGE_RE.search(msg)
+        stage = m.group(1).lower() if m else None
+        line_color = _STAGE_COLOR.get(stage, "") if stage else _LOGGER_COLOR.get(record.name, "\033[37m")
+
+        # Badge
+        if stage:
+            badge = f"{_B}{line_color}[{stage.upper():8}]{_R}"
+        else:
+            short = record.name.replace("miner.", "")
+            badge = f"{_D}{line_color}[{short:8}]{_R}"
+
+        # Timestamp
+        ts = f"{_D}{self.formatTime(record, self.datefmt)}{_R}"
+
+        # Level
+        lc, sym = _LEVEL_FMT.get(record.levelname, ("\033[37m", " "))
+        level = f"{lc}{sym}{_R}"
+
+        # Mensaje coloreado
+        colored_msg = f"{line_color}{msg}{_R}"
+
+        # Traceback si lo hay
+        if record.exc_info:
+            colored_msg += "\n" + self.formatException(record.exc_info)
+
+        return f"{ts} {level} {badge} {colored_msg}"
+
 
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(ColorFormatter(datefmt="%H:%M:%S"))
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers = [handler]
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -69,6 +135,11 @@ Ejemplos:
         help="Segundos entre corridas en modo continuo (default: 3600)",
     )
     parser.add_argument("--output-json", type=Path, help="Guarda el resumen en un archivo JSON")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Borra el dataset, repos clonados y reportes antes de empezar (empieza de cero)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Logging detallado (DEBUG)")
     return parser.parse_args()
 
@@ -172,6 +243,28 @@ async def main() -> int:
         f"interval_s={config.run_interval_s}"
     )
 
+    if args.reset:
+        import shutil
+        reports_root = Path(os.environ.get("REPORTS_ROOT", "/data/reports"))
+        targets = [
+            (Path(config.db_path), "dataset"),
+            (config.clone_root,    "repos clonados"),
+            (reports_root,         "reportes"),
+        ]
+        logger.warning("⚠  --reset: se eliminarán los siguientes datos:")
+        for path, label in targets:
+            logger.warning(f"   {label}: {path}")
+        for path, label in targets:
+            if path.is_file():
+                path.unlink()
+                logger.info(f"   ✓ {label} eliminado")
+            elif path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                logger.info(f"   ✓ {label} eliminado")
+        logger.info("✅  Reset completo. Listo para una nueva extracción.")
+        if not (args.dry_run or args.continuous):
+            return 0
+
     if args.dry_run:
         if config.continuous:
             logger.error("--dry-run no es compatible con --continuous")
@@ -179,6 +272,11 @@ async def main() -> int:
         from .miner import GitHubClient
 
         client = GitHubClient(config.github_token)
+        try:
+            await client.preflight_check(config.org_name)
+        except Exception as e:
+            logger.error(str(e))
+            return 1
         count = 0
         logger.info(f"[DRY RUN] Listando repos de '{config.org_name}'…")
         async for repo in client.list_org_repos(config.org_name, config.visibility):
@@ -187,6 +285,14 @@ async def main() -> int:
             count += 1
         print(f"\nTotal: {count} repositorios")
         return 0
+
+    # Preflight: validar token y org antes de empezar
+    try:
+        from .miner import GitHubClient
+        await GitHubClient(config.github_token).preflight_check(config.org_name)
+    except Exception as e:
+        logger.error(str(e))
+        return 1
 
     try:
         if not config.continuous:

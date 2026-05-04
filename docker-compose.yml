@@ -48,7 +48,7 @@ services:
     command: python -m http.server 4173
     volumes:
       - ./data-visualizer:/app:ro
-      - dataset_data:/data:ro
+      - dataset_data:/app/data:ro   # montado dentro de /app para que el HTTP server lo sirva
     ports:
       - "4173:4173"
 

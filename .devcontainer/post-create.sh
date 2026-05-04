@@ -60,7 +60,6 @@ fi
 # 5. Crear directorios de datos si no existen
 # -------------------------------------------------------------
 mkdir -p /data/repos /data/reports
-touch /data/secpipeline.json
 
 # -------------------------------------------------------------
 # 6. Mensaje final
@@ -73,7 +72,7 @@ echo ""
 echo "  Comandos rápidos:"
 echo "    python -m miner --dry-run    Lista repos de la org"
 echo "    python -m miner              Clonar + analizar"
-echo "    cd /workspace/data-visualizer && npm run start"
+echo "    python /workspace/data-visualizer/serve.py"
 echo "    pytest miner/tests/ -v       Correr tests"
 echo ""
 echo "  Configurar antes de usar:"
