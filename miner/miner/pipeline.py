@@ -522,14 +522,13 @@ class Pipeline:
 
     async def run(self, repos: list[Repository]) -> dict[str, Any]:
         """
-        Ejecuta el pipeline en tres etapas secuenciales:
-          1. Clone (todos los repos en paralelo)
-          2. Gitleaks + SBOM en paralelo
-          3. Grype + CodeQL en paralelo
+        Pipeline streaming: cada repo avanza etapa a etapa en cuanto termina
+        la anterior, sin esperar a que todos los repos completen cada fase.
 
-        Los DONEs se inyectan centralizadamente después de que cada etapa
-        completa, evitando que un worker rápido cierre las colas downstream
-        antes de que los demás terminen.
+        Los coordinadores (_after_clone, _after_sbom) inyectan los sentineles
+        downstream solo cuando todos sus workers productores terminaron,
+        garantizando que ningún worker cierre la cola antes de tiempo.
+        Todos los workers corren en un único asyncio.gather desde el inicio.
         """
         if not repos:
             return {"total": 0, "stages": {}}
@@ -549,37 +548,39 @@ class Pipeline:
             f"codeql={self.config.codeql_workers}"
         )
 
-        # Etapa 1: Clone
         for repo in repos:
             await q_clone.put(repo)
         for _ in range(self.config.clone_workers):
             await q_clone.put(_DONE)
-        await asyncio.gather(
-            *[
-                self._worker_clone(q_clone, q_gitleaks, q_sbom)
-                for _ in range(self.config.clone_workers)
-            ]
-        )
 
-        # Etapa 2: Gitleaks + SBOM en paralelo
-        for _ in range(self.config.gitleaks_workers):
-            await q_gitleaks.put(_DONE)
-        for _ in range(self.config.sbom_workers):
-            await q_sbom.put(_DONE)
+        async def _after_clone() -> None:
+            await asyncio.gather(
+                *[
+                    self._worker_clone(q_clone, q_gitleaks, q_sbom)
+                    for _ in range(self.config.clone_workers)
+                ]
+            )
+            for _ in range(self.config.gitleaks_workers):
+                await q_gitleaks.put(_DONE)
+            for _ in range(self.config.sbom_workers):
+                await q_sbom.put(_DONE)
+
+        async def _after_sbom() -> None:
+            await asyncio.gather(
+                *[
+                    self._worker_sbom(q_sbom, q_grype, q_codeql)
+                    for _ in range(self.config.sbom_workers)
+                ]
+            )
+            for _ in range(self.config.grype_workers):
+                await q_grype.put(_DONE)
+            for _ in range(self.config.codeql_workers):
+                await q_codeql.put(_DONE)
+
         await asyncio.gather(
+            _after_clone(),
+            _after_sbom(),
             *[self._worker_gitleaks(q_gitleaks) for _ in range(self.config.gitleaks_workers)],
-            *[
-                self._worker_sbom(q_sbom, q_grype, q_codeql)
-                for _ in range(self.config.sbom_workers)
-            ],
-        )
-
-        # Etapa 3: Grype + CodeQL en paralelo
-        for _ in range(self.config.grype_workers):
-            await q_grype.put(_DONE)
-        for _ in range(self.config.codeql_workers):
-            await q_codeql.put(_DONE)
-        await asyncio.gather(
             *[self._worker_grype(q_grype) for _ in range(self.config.grype_workers)],
             *[self._worker_codeql(q_codeql) for _ in range(self.config.codeql_workers)],
         )
@@ -616,6 +617,7 @@ class Pipeline:
                     clone_path=result.metadata["clone_path"],
                     commit_sha=result.metadata["commit_sha"],
                 )
+                logger.info(f"[clone] ✓ {repo.full_name}")
                 await out_gitleaks.put(result)
                 await out_sbom.put(result)
             else:

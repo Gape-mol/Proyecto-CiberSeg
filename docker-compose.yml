@@ -33,14 +33,16 @@ services:
       REPO_LIMIT: ${REPO_LIMIT:-50}
       REPO_RECENT_DAYS: ${REPO_RECENT_DAYS:-30}
       CODEQL_WORKERS: ${CODEQL_WORKERS:-1}
+      RUN_CONTINUOUS: ${RUN_CONTINUOUS:-true}
+      RUN_INTERVAL_SECONDS: ${RUN_INTERVAL_SECONDS:-3600}
     volumes:
-      - repos_data:/data/repos      # Repos clonados (compartido con analizadores)
-      - reports_data:/data/reports  # Reportes JSON/SARIF (compartido con analizadores)
-      - dataset_data:/data          # Dataset JSON legible para analyzer/visualizer
-    restart: "no"                   # El miner corre una vez; usar scheduler externo
+      - repos_data:/data/repos
+      - reports_data:/data/reports
+      - dataset_data:/data
+    restart: unless-stopped
 
   # ----------------------------------------------------------
-  # Visualizer estático opcional
+  # Visualizer
   # ----------------------------------------------------------
   visualizer:
     image: python:3.12-slim
@@ -51,6 +53,28 @@ services:
       - dataset_data:/app/data:ro   # montado dentro de /app para que el HTTP server lo sirva
     ports:
       - "4173:4173"
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Jupyter Lab para los notebooks de análisis
+  # ----------------------------------------------------------
+  jupyter:
+    image: python:3.12-slim
+    working_dir: /workspace
+    command: >
+      bash -c "pip install --quiet jupyterlab pandas matplotlib seaborn &&
+               pip install --quiet -r /workspace/analyzers/requirements.txt &&
+               jupyter lab --ip=0.0.0.0 --no-browser --allow-root
+               --port=8888 --notebook-dir=/workspace/analyzers
+               --ServerApp.token='' --ServerApp.password=''"
+    environment:
+      DB_PATH: /data/secpipeline.json
+    volumes:
+      - ./analyzers:/workspace/analyzers
+      - dataset_data:/data:ro
+    ports:
+      - "8888:8888"
+    restart: unless-stopped
 
 volumes:
   repos_data:

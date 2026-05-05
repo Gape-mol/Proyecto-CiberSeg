@@ -68,10 +68,11 @@
   // Corre después de crear el container
   "postCreateCommand": "bash /workspace/.devcontainer/post-create.sh",
 
-  // Reenvío de puertos: visualizer estático
-  "forwardPorts": [4173],
+  // Reenvío de puertos
+  "forwardPorts": [4173, 8888],
   "portsAttributes": {
-    "4173": { "label": "Visualizer", "onAutoForward": "notify" }
+    "4173": { "label": "Visualizer", "onAutoForward": "notify" },
+    "8888": { "label": "Jupyter Lab", "onAutoForward": "notify" }
   },
 
   "remoteUser": "vscode"

@@ -490,21 +490,45 @@ class Database:
                 if not isinstance(vuln, dict) or not isinstance(artifact, dict):
                     continue
                 primary_location, all_locations = _grype_locations(match)
+
+                # vulnerability.cvss suele estar vacío en entradas de namespace
+                # específico (ej. github:language:*). El score NVD real está en
+                # relatedVulnerabilities[].cvss — lo buscamos como fallback.
+                related = match.get("relatedVulnerabilities") or []
+                cvss_sources: list[list[Any]] = [
+                    vuln.get("cvss") or [],
+                    *[rv.get("cvss") or [] for rv in related if isinstance(rv, dict)],
+                ]
                 cvss_score = None
-                for cvss in vuln.get("cvss", []):
-                    if not isinstance(cvss, dict):
-                        continue
-                    score = cvss.get("metrics", {}).get("baseScore")
-                    if score is not None:
-                        cvss_score = float(score)
+                for cvss_list in cvss_sources:
+                    for cvss in cvss_list:
+                        if not isinstance(cvss, dict):
+                            continue
+                        score = cvss.get("metrics", {}).get("baseScore")
+                        if score is not None:
+                            cvss_score = float(score)
+                            break
+                    if cvss_score is not None:
                         break
+
+                # severity también puede venir vacía en advisories propios;
+                # si es así, usar la del entry NVD relacionado.
+                severity = vuln.get("severity") or ""
+                if not severity or severity.lower() == "unknown":
+                    for rv in related:
+                        if isinstance(rv, dict):
+                            rv_sev = rv.get("severity") or ""
+                            if rv_sev and rv_sev.lower() != "unknown":
+                                severity = rv_sev
+                                break
+
                 self._store["grype_findings"].append(
                     {
                         "id": self._allocate_id_unlocked("grype_findings"),
                         "scan_id": scan_id,
                         "repo_id": repo_id,
                         "vulnerability_id": vuln.get("id"),
-                        "severity": vuln.get("severity"),
+                        "severity": severity or vuln.get("severity"),
                         "location": primary_location,
                         "locations": all_locations,
                         "cvss_score": cvss_score,
@@ -529,7 +553,10 @@ class Database:
         if not results:
             return
 
-        level_to_severity = {"error": "high", "warning": "medium", "note": "low"}
+        level_to_severity = {
+            "error": "high", "warning": "medium", "note": "low",
+            "recommendation": "low",
+        }
 
         async with self._lock:
             for result in results:
@@ -539,7 +566,15 @@ class Database:
                 if not isinstance(props, dict):
                     props = {}
                 level = result.get("level", "")
-                severity = level_to_severity.get(level, level) or props.get("problem.severity")
+                rule_sev = props.get("problem.severity", "")
+                # Normalizar siempre a high/medium/low: intentar level primero,
+                # luego problem.severity del rule (también puede ser "error"/"warning")
+                severity = (
+                    level_to_severity.get(level)
+                    or level_to_severity.get((rule_sev or "").lower())
+                    or (rule_sev.lower() if rule_sev else None)
+                    or "medium"
+                )
                 locations = result.get("locations", [{}])
                 if not isinstance(locations, list):
                     locations = [{}]

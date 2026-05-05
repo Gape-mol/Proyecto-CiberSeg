@@ -6,26 +6,24 @@
   <title>Security Pipeline — Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
-    /* ── Reset & variables ─────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:          #0f172a;
-      --surface:     #1e293b;
-      --surface2:    #293548;
-      --border:      #334155;
-      --text:        #f1f5f9;
-      --text2:       #94a3b8;
-      --text3:       #64748b;
-      --accent:      #3b82f6;
-      --accent-glow: rgba(59,130,246,.15);
+      --bg:       #0f172a;
+      --surface:  #1e293b;
+      --surface2: #293548;
+      --border:   #334155;
+      --text:     #f1f5f9;
+      --text2:    #94a3b8;
+      --text3:    #64748b;
+      --accent:   #3b82f6;
 
-      --critical:    #ef4444;
-      --high:        #f97316;
-      --medium:      #eab308;
-      --low:         #22c55e;
-      --negligible:  #94a3b8;
-      --unknown:     #475569;
+      --critical:   #ef4444;
+      --high:       #f97316;
+      --medium:     #eab308;
+      --low:        #22c55e;
+      --negligible: #94a3b8;
+      --unknown:    #475569;
 
       --codeql:   #3b82f6;
       --grype:    #f97316;
@@ -36,8 +34,6 @@
       --gap: 16px;
     }
 
-    html { scroll-behavior: smooth; }
-
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
@@ -46,474 +42,450 @@
       font-size: 14px;
     }
 
-    /* ── Header ────────────────────────────────────────────────────────── */
+    /* ── Header ─────────────────────────────────────────────── */
     #header {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(15,23,42,.92);
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(15,23,42,.94);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      padding: 0 24px;
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
+      padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: center; gap: 24px;
     }
-
-    #header-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
+    #header-left { display: flex; align-items: center; gap: 12px; }
     #logo {
-      width: 28px;
-      height: 28px;
+      width: 30px; height: 30px;
       background: linear-gradient(135deg, var(--accent), #8b5cf6);
-      border-radius: 7px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      flex-shrink: 0;
+      border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; font-size: 16px; flex-shrink: 0;
     }
+    #title-block h1 { font-size: 15px; font-weight: 600; line-height: 1.2; }
+    #header-center  { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: center; }
+    #header-right   { display: flex; align-items: center; gap: 12px; }
 
-    #title-block h1 {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-      line-height: 1.2;
+    /* Alerta inline en el header */
+    #header-alert {
+      display: none; align-items: center; gap: 7px;
+      font-size: 11px; padding: 4px 12px; border-radius: 6px;
+      border: 1px solid; white-space: nowrap;
     }
+    #header-alert.loading { color: var(--medium); border-color: var(--medium); background: rgba(234,179,8,.08); display:flex; }
+    #header-alert.error   { color: var(--critical); border-color: var(--critical); background: rgba(239,68,68,.08); display:flex; }
 
-    #title-block p {
-      font-size: 11px;
-      color: var(--text3);
-    }
-
-    #header-right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    #status-badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--text2);
-    }
-
+    #status-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
     #status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--low);
-      box-shadow: 0 0 6px var(--low);
-      transition: background .3s;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--low); box-shadow: 0 0 6px var(--low); transition: background .3s;
     }
-
     #status-dot.loading { background: var(--medium); box-shadow: 0 0 6px var(--medium); animation: pulse 1s infinite; }
     #status-dot.error   { background: var(--critical); box-shadow: 0 0 6px var(--critical); }
-
+    #status-dot.live    { background: var(--low); box-shadow: 0 0 8px var(--low); animation: pulse .8s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
     #refresh-btn {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text2);
-      padding: 5px 12px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all .2s;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text2); padding: 5px 12px;
+      font-size: 12px; cursor: pointer; transition: all .2s;
     }
     #refresh-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-    /* ── Main layout ───────────────────────────────────────────────────── */
-    #main {
-      padding: 24px;
-      max-width: 1400px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+    /* ── Layout ──────────────────────────────────────────────── */
+    #main { padding: 28px 28px 40px; max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 
-    /* ── Error / empty state ───────────────────────────────────────────── */
-    #error-state {
-      display: none;
+    /* ── Section separator ───────────────────────────────────── */
+    .section-sep {
+      display: flex; align-items: center; gap: 12px;
+      margin: 28px 0 6px;
+    }
+    .section-sep:first-child { margin-top: 4px; }
+    .section-sep .sep-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text2);
+      white-space: nowrap; padding: 5px 12px;
+      border: 1px solid var(--border); border-radius: 4px;
       background: var(--surface);
-      border: 1px solid var(--critical);
-      border-radius: var(--radius);
-      padding: 32px;
-      text-align: center;
-      color: var(--text2);
     }
-    #error-state h2 { color: var(--critical); margin-bottom: 8px; }
-
-    /* ── Section labels ────────────────────────────────────────────────── */
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: var(--text3);
-      margin-bottom: 10px;
+    .section-sep::before, .section-sep::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
     }
 
-    /* ── Stat cards ────────────────────────────────────────────────────── */
-    #cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: var(--gap);
-    }
-
+    /* ── Cards ───────────────────────────────────────────────── */
+    .cards-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; }
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color .2s;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 22px;
+      display: flex; flex-direction: column; gap: 6px;
+      position: relative; overflow: hidden; transition: border-color .2s;
     }
     .card:hover { border-color: var(--accent); }
-
     .card::before {
-      content: "";
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: var(--card-color, var(--accent));
+      content: ''; position: absolute; top: 0; left: 0; right: 0;
+      height: 3px; background: var(--card-accent, var(--accent));
     }
-
-    .card-icon { font-size: 22px; line-height: 1; }
-    .card-value { font-size: 28px; font-weight: 700; color: var(--text); line-height: 1.1; }
+    .card-icon  { font-size: 20px; line-height: 1; }
+    .card-value { font-size: 26px; font-weight: 700; color: var(--text); line-height: 1.1; }
     .card-label { font-size: 12px; color: var(--text2); }
-    .card-sub   { font-size: 11px; color: var(--text3); margin-top: 4px; }
+    .card-sub   { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
-    /* ── Charts grid ───────────────────────────────────────────────────── */
-    .charts-grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--gap);
-    }
-
-    .charts-grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: var(--gap);
-    }
+    /* ── Chart grids ─────────────────────────────────────────── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr;       gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
 
     .chart-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px 24px;
+      display: flex; flex-direction: column; gap: 12px;
     }
+    .chart-card h3  { font-size: 13px; font-weight: 600; color: var(--text); }
+    .chart-card .sub { font-size: 11px; color: var(--text3); margin-top: -6px; }
 
-    .chart-card h3 {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text);
-    }
+    .chart-wrap          { position: relative; height: 240px; }
+    .chart-wrap.h160     { height: 160px; }
+    .chart-wrap.h220     { height: 220px; }
+    .chart-wrap.h260     { height: 260px; }
+    .chart-wrap.h300     { height: 300px; }
+    .chart-wrap.h320     { height: 320px; }
 
-    .chart-card p.sub {
-      font-size: 11px;
-      color: var(--text3);
-      margin-top: -8px;
-    }
-
-    .chart-wrap {
-      position: relative;
-      flex: 1;
-      min-height: 220px;
-    }
-
-    .chart-wrap.tall { min-height: 300px; }
-    .chart-wrap.short { min-height: 160px; }
-
-    /* ── Table ─────────────────────────────────────────────────────────── */
-    #table-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-
+    /* ── Table ───────────────────────────────────────────────── */
+    #table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     #table-header {
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border);
-      gap: 12px;
-      flex-wrap: wrap;
+      padding: 14px 20px; display: flex; align-items: center;
+      justify-content: space-between; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
     }
-
     #table-header h3 { font-size: 13px; font-weight: 600; }
-
     #table-search {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 6px 12px;
-      font-size: 12px;
-      width: 220px;
-      outline: none;
-      transition: border-color .2s;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 6px 12px;
+      font-size: 12px; width: 220px; outline: none; transition: border-color .2s;
     }
     #table-search:focus { border-color: var(--accent); }
     #table-search::placeholder { color: var(--text3); }
 
     .table-wrap { overflow-x: auto; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12.5px;
-    }
-
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     thead th {
-      background: var(--surface2);
-      color: var(--text2);
-      font-weight: 600;
-      font-size: 11px;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      padding: 10px 14px;
-      text-align: left;
-      white-space: nowrap;
-      cursor: pointer;
-      user-select: none;
-      transition: color .2s;
+      background: var(--surface2); color: var(--text2); font-weight: 600;
+      font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+      padding: 10px 14px; text-align: left; white-space: nowrap;
+      cursor: pointer; user-select: none; transition: color .2s;
     }
     thead th:hover { color: var(--text); }
     thead th.sorted { color: var(--accent); }
-    thead th .sort-icon { opacity: .4; margin-left: 4px; }
-    thead th.sorted .sort-icon { opacity: 1; }
-
-    tbody tr {
-      border-top: 1px solid var(--border);
-      transition: background .15s;
-    }
+    thead th .si { opacity: .4; margin-left: 4px; }
+    thead th.sorted .si { opacity: 1; }
+    tbody tr { border-top: 1px solid var(--border); transition: background .15s; }
     tbody tr:hover { background: var(--surface2); }
-
     tbody td { padding: 9px 14px; color: var(--text2); white-space: nowrap; }
-    tbody td.name { color: var(--text); font-weight: 500; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+    tbody td.name { color: var(--text); font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
     tbody td.num  { text-align: right; font-variant-numeric: tabular-nums; }
 
-    .lang-badge {
-      display: inline-block;
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      background: var(--surface2);
-      color: var(--text2);
-    }
+    .lang-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: var(--surface2); color: var(--text2); }
 
-    .score-pill {
-      display: inline-block;
-      padding: 2px 9px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 700;
-      min-width: 38px;
-      text-align: center;
+    .status-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 10px; font-weight: 600;
     }
+    .st-cloned  { background: rgba(34,197,94,.15);  color: var(--low); }
+    .st-cloning { background: rgba(234,179,8,.15);  color: var(--medium); animation: pulse 1s infinite; }
+    .st-pending { background: var(--surface2);       color: var(--text3); }
+    .st-error   { background: rgba(239,68,68,.15);  color: var(--critical); }
 
-    .score-critical { background: rgba(239,68,68,.2);  color: var(--critical); }
-    .score-high     { background: rgba(249,115,22,.2); color: var(--high); }
-    .score-medium   { background: rgba(234,179,8,.2);  color: var(--medium); }
-    .score-low      { background: rgba(34,197,94,.2);  color: var(--low); }
-    .score-none     { background: var(--surface2);     color: var(--text3); }
+    /* ── Loading / error ─────────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Severity pills in table ───────────────────────────────────────── */
-    .sev-bar {
-      display: flex;
-      gap: 2px;
-      min-width: 80px;
-    }
-    .sev-seg {
-      height: 14px;
-      border-radius: 2px;
-      min-width: 4px;
-      flex: var(--flex, 1);
-    }
+    #dashboard { display: none; }
 
-    /* ── Footer ─────────────────────────────────────────────────────────── */
-    #footer {
-      text-align: center;
-      font-size: 11px;
-      color: var(--text3);
-      padding: 16px 0 28px;
-    }
+    /* ── Footer ──────────────────────────────────────────────── */
+    #footer { text-align: center; font-size: 11px; color: var(--text3); padding: 16px 0 28px; }
 
-    /* ── Responsive ──────────────────────────────────────────────────────── */
-    @media (max-width: 900px) {
-      .charts-grid-2, .charts-grid-3 { grid-template-columns: 1fr; }
-      #main { padding: 16px; }
+    /* ── Tooltip ─────────────────────────────────────────────── */
+    [data-tip] { position: relative; cursor: default; }
+    [data-tip]::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      background: #0f172a; border: 1px solid var(--border);
+      color: var(--text2); font-size: 11px; font-weight: 400;
+      line-height: 1.5; white-space: pre-line; text-align: left;
+      padding: 8px 11px; border-radius: 6px;
+      width: max-content; max-width: 260px;
+      pointer-events: none; opacity: 0;
+      transition: opacity .15s; z-index: 200;
+      box-shadow: 0 4px 16px rgba(0,0,0,.4);
     }
-    @media (max-width: 600px) {
-      #cards { grid-template-columns: repeat(2, 1fr); }
-      #header { padding: 0 14px; }
-      #header-right .ts { display: none; }
+    [data-tip]:hover::after { opacity: 1; }
+    /* Evitar que el tooltip se salga por los costados en las primeras/últimas columnas */
+    [data-tip].tip-right::after { left: 0; transform: none; }
+    [data-tip].tip-left::after  { left: auto; right: 0; transform: none; }
+
+    /* ── Progress bars ───────────────────────────────────────── */
+    #progress-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 24px;
+      display: flex; flex-direction: column; gap: 10px;
     }
+    #progress-card h3 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .prog-row { display: flex; align-items: center; gap: 12px; }
+    .prog-label {
+      width: 80px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .04em; color: var(--text2);
+      flex-shrink: 0;
+    }
+    .prog-track {
+      flex: 1; height: 7px; background: var(--surface2);
+      border-radius: 4px; overflow: hidden;
+    }
+    .prog-fill {
+      height: 100%; border-radius: 4px;
+      transition: width .4s ease;
+    }
+    .prog-count { font-size: 11px; color: var(--text3); white-space: nowrap; min-width: 70px; text-align: right; }
+
+    /* Espacio extra antes de la tabla de comparación */
+    #table-card { margin-top: 12px; }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 1000px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 700px)  { .grid-3, .grid-2 { grid-template-columns: 1fr; } #main { padding: 14px; } }
   </style>
 </head>
 <body>
 
-<!-- ── Header ──────────────────────────────────────────────────────────── -->
 <header id="header">
   <div id="header-left">
     <div id="logo">🛡</div>
-    <div id="title-block">
-      <h1>Security Pipeline</h1>
-      <p id="org-label">Cargando…</p>
-    </div>
+    <div id="title-block"><h1>Security Pipeline</h1></div>
+  </div>
+  <div id="header-center">
+    <div id="header-alert"></div>
   </div>
   <div id="header-right">
     <div id="status-badge">
       <div id="status-dot" class="loading"></div>
-      <span id="status-text">Cargando datos…</span>
+      <span id="status-text">Conectando…</span>
     </div>
-    <span class="ts" id="timestamp" style="font-size:11px;color:var(--text3)"></span>
-    <button id="refresh-btn" onclick="refresh()">↺ Actualizar</button>
+    <span id="timestamp" style="font-size:11px;color:var(--text3)"></span>
+    <button id="refresh-btn" onclick="loadData()">↺ Actualizar</button>
   </div>
 </header>
 
-<!-- ── Main ────────────────────────────────────────────────────────────── -->
 <main id="main">
 
-  <!-- Error state -->
-  <div id="error-state">
-    <h2>No se pudo cargar el dataset</h2>
-    <p>Asegurate de que el miner haya generado <code>secpipeline.json</code> y que el volumen esté montado en <code>/app/data/</code>.</p>
-    <br>
-    <code style="font-size:11px;color:var(--text3)">docker compose run --rm miner</code>
-  </div>
+  <div id="dashboard">
 
-  <!-- Stat cards -->
-  <div id="cards">
-    <div class="card" style="--card-color:var(--accent)">
-      <div class="card-icon">🗄</div>
-      <div class="card-value" id="c-repos">—</div>
-      <div class="card-label">Repositorios</div>
-      <div class="card-sub" id="c-repos-sub"></div>
-    </div>
-    <div class="card" style="--card-color:var(--codeql)">
-      <div class="card-icon">🔍</div>
-      <div class="card-value" id="c-codeql">—</div>
-      <div class="card-label">Hallazgos CodeQL</div>
-      <div class="card-sub" id="c-codeql-sub"></div>
-    </div>
-    <div class="card" style="--card-color:var(--grype)">
-      <div class="card-icon">⚠️</div>
-      <div class="card-value" id="c-grype">—</div>
-      <div class="card-label">CVEs (Grype)</div>
-      <div class="card-sub" id="c-grype-sub"></div>
-    </div>
-    <div class="card" style="--card-color:var(--gitleaks)">
-      <div class="card-icon">🔑</div>
-      <div class="card-value" id="c-gitleaks">—</div>
-      <div class="card-label">Secretos (Gitleaks)</div>
-      <div class="card-sub" id="c-gitleaks-sub"></div>
-    </div>
-    <div class="card" style="--card-color:var(--sbom)">
-      <div class="card-icon">📦</div>
-      <div class="card-value" id="c-sbom">—</div>
-      <div class="card-label">Componentes SBOM</div>
-      <div class="card-sub" id="c-sbom-sub"></div>
-    </div>
-    <div class="card" style="--card-color:var(--critical)">
-      <div class="card-icon">🚨</div>
-      <div class="card-value" id="c-critical">—</div>
-      <div class="card-label">Critical + High</div>
-      <div class="card-sub" id="c-critical-sub"></div>
-    </div>
-  </div>
+    <!-- ═══════════ SECCIÓN 1: RESUMEN GENERAL ═══════════ -->
+    <div class="section-sep"><span class="sep-label">Resumen General</span></div>
 
-  <!-- Row 1: Donut severity + Top repos risk -->
-  <div class="charts-grid-2">
-    <div class="chart-card">
-      <h3>Distribución de Severidad Global</h3>
-      <p class="sub">CodeQL + Grype + Gitleaks combinados</p>
-      <div class="chart-wrap short"><canvas id="chart-sev-donut"></canvas></div>
+    <div class="cards-row" id="cards-general">
+      <div class="card" style="--card-accent:var(--accent)">
+        <div class="card-icon">🗄</div>
+        <div class="card-value" id="k-repos">—</div>
+        <div class="card-label">Repositorios</div>
+        <div class="card-sub" id="k-repos-sub"></div>
+      </div>
+      <div class="card" style="--card-accent:var(--sbom)">
+        <div class="card-icon">📦</div>
+        <div class="card-value" id="k-sbom">—</div>
+        <div class="card-label">Componentes SBOM</div>
+        <div class="card-sub" id="k-sbom-sub"></div>
+      </div>
+      <div class="card" style="--card-accent:var(--gitleaks)">
+        <div class="card-icon">🔑</div>
+        <div class="card-value" id="k-gitleaks">—</div>
+        <div class="card-label">Secretos (Gitleaks)</div>
+        <div class="card-sub" id="k-gitleaks-sub"></div>
+      </div>
+      <div class="card" style="--card-accent:var(--codeql)">
+        <div class="card-icon">🔍</div>
+        <div class="card-value" id="k-codeql">—</div>
+        <div class="card-label">Hallazgos CodeQL</div>
+        <div class="card-sub" id="k-codeql-sub"></div>
+      </div>
+      <div class="card" style="--card-accent:var(--grype)">
+        <div class="card-icon">⚠️</div>
+        <div class="card-value" id="k-grype">—</div>
+        <div class="card-label">CVEs (Grype)</div>
+        <div class="card-sub" id="k-grype-sub"></div>
+      </div>
     </div>
-    <div class="chart-card">
-      <h3>Top 10 — Puntuación de Riesgo</h3>
-      <p class="sub">Critical×10 · High×5 · Medium×2 · Low×1 · Secreto×3</p>
-      <div class="chart-wrap"><canvas id="chart-risk-bar"></canvas></div>
-    </div>
-  </div>
 
-  <!-- Row 2: Per-tool severity -->
-  <div class="charts-grid-3">
-    <div class="chart-card">
-      <h3>CodeQL — Severidad</h3>
-      <div class="chart-wrap short"><canvas id="chart-codeql-sev"></canvas></div>
+    <div id="progress-card">
+      <h3>Progreso del Pipeline</h3>
+      <div class="prog-row">
+        <span class="prog-label">Clonado</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-clone" style="background:var(--accent);width:0%"></div></div>
+        <span class="prog-count" id="prog-clone-txt">—</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-label">Gitleaks</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-gl" style="background:var(--gitleaks);width:0%"></div></div>
+        <span class="prog-count" id="prog-gl-txt">—</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-label">SBOM</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-sbom" style="background:var(--sbom);width:0%"></div></div>
+        <span class="prog-count" id="prog-sbom-txt">—</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-label">Grype</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-grype" style="background:var(--grype);width:0%"></div></div>
+        <span class="prog-count" id="prog-grype-txt">—</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-label">CodeQL</span>
+        <div class="prog-track"><div class="prog-fill" id="prog-codeql" style="background:var(--codeql);width:0%"></div></div>
+        <span class="prog-count" id="prog-codeql-txt">—</span>
+      </div>
     </div>
-    <div class="chart-card">
-      <h3>Grype — Severidad CVEs</h3>
-      <div class="chart-wrap short"><canvas id="chart-grype-sev"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <h3>Gitleaks — Tipos de Secretos</h3>
-      <div class="chart-wrap short"><canvas id="chart-gitleaks-types"></canvas></div>
-    </div>
-  </div>
 
-  <!-- Row 3: SBOM ecosystem + Grype fixable -->
-  <div class="charts-grid-2">
-    <div class="chart-card">
-      <h3>SBOM — Ecosistemas de Paquetes</h3>
-      <p class="sub">Distribución de gestores de dependencias detectados</p>
-      <div class="chart-wrap short"><canvas id="chart-sbom-eco"></canvas></div>
+    <div id="table-card">
+      <div id="table-header">
+        <h3>Comparación de Repositorios</h3>
+        <input type="search" id="table-search" placeholder="Filtrar por nombre…" oninput="filterTable(this.value)" />
+      </div>
+      <div class="table-wrap">
+        <table id="repo-table">
+          <thead><tr>
+            <th onclick="sortTable('full_name')"    data-col="full_name"    class="tip-right" data-tip="Nombre completo del repositorio\nen la organización de GitHub.">    Repositorio    <span class="si">↕</span></th>
+            <th onclick="sortTable('language')"     data-col="language"     class="tip-right" data-tip="Lenguaje de programación principal\ndetectado por GitHub.">     Lenguaje       <span class="si">↕</span></th>
+            <th onclick="sortTable('stars')"        data-col="stars"        data-tip="Estrellas en GitHub.\nIndica popularidad del repositorio.">        Stars          <span class="si">↕</span></th>
+            <th onclick="sortTable('status')"       data-col="status"       data-tip="Estado del pipeline:\n• pendiente — en cola\n• analizando — clonando/procesando\n• clonado — listo\n• error — falló algún paso">       Estado         <span class="si">↕</span></th>
+            <th onclick="sortTable('codeql_count')" data-col="codeql_count" data-tip="Hallazgos de CodeQL (análisis estático).\nDetecta vulnerabilidades en el código fuente:\ninyecciones, XSS, path traversal, etc.\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">  CodeQL         <span class="si">↕</span></th>
+            <th onclick="sortTable('grype_count')"  data-col="grype_count"  data-tip="CVEs detectados por Grype en dependencias.\nCompara los paquetes del repo contra bases de\ndatos de vulnerabilidades (NVD, GHSA, OSV).\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">  CVEs           <span class="si">↕</span></th>
+            <th onclick="sortTable('sec_count')"    data-col="sec_count"    data-tip="Secretos expuestos detectados por Gitleaks.\nBusca tokens, API keys, contraseñas y\ncertificados hardcodeados en el historial git.\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">    Secretos       <span class="si">↕</span></th>
+            <th onclick="sortTable('sbom_count')"   data-col="sbom_count"   data-tip="Componentes en el SBOM generado por Syft.\nEl SBOM (Software Bill of Materials) es el\ninventario completo de dependencias del repo.\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">   SBOM           <span class="si">↕</span></th>
+          </tr></thead>
+          <tbody id="repo-tbody"></tbody>
+        </table>
+      </div>
     </div>
-    <div class="chart-card">
-      <h3>CVEs — Remediabilidad por Severidad</h3>
-      <p class="sub">Con fix disponible vs sin fix, agrupado por severidad</p>
-      <div class="chart-wrap short"><canvas id="chart-grype-fix"></canvas></div>
-    </div>
-  </div>
 
-  <!-- Row 4: Repository comparison table -->
-  <div id="table-card">
-    <div id="table-header">
-      <h3>Comparación de Repositorios</h3>
-      <input type="search" id="table-search" placeholder="Filtrar por nombre…" oninput="filterTable(this.value)" />
-    </div>
-    <div class="table-wrap">
-      <table id="repo-table">
-        <thead>
-          <tr>
-            <th onclick="sortTable('full_name')"    data-col="full_name">    Repositorio     <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('language')"     data-col="language">     Lenguaje        <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('stars')"        data-col="stars">        Stars           <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('codeql_count')" data-col="codeql_count"> CodeQL          <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('grype_count')"  data-col="grype_count">  CVEs            <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('sec_count')"    data-col="sec_count">    Secretos        <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('sbom_count')"   data-col="sbom_count">   SBOM            <span class="sort-icon">↕</span></th>
-            <th onclick="sortTable('risk_score')"   data-col="risk_score">   Riesgo          <span class="sort-icon">↕</span></th>
-            <th>Severidad</th>
-          </tr>
-        </thead>
-        <tbody id="repo-tbody"></tbody>
-      </table>
-    </div>
-  </div>
+    <!-- ═══════════ SECCIÓN 2: SBOM ═══════════ -->
+    <div class="section-sep"><span class="sep-label">Inventario de Dependencias — SBOM</span></div>
 
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Componentes por Ecosistema</h3>
+        <p class="sub">npm=JS · pypi=Python · maven=Java · cargo=Rust · gem=Ruby</p>
+        <div class="chart-wrap h160"><canvas id="chart-sbom-eco"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Top 15 Licencias</h3>
+        <p class="sub">GPL/LGPL/AGPL en naranja: imponen obligaciones legales</p>
+        <div class="chart-wrap h160"><canvas id="chart-sbom-lic"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Componentes por Repositorio</h3>
+        <p class="sub">Más dependencias = mayor superficie de ataque</p>
+        <div class="chart-wrap h260"><canvas id="chart-sbom-repos"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Top 15 Dependencias Compartidas</h3>
+        <p class="sub">Paquetes en múltiples repos: una vulnerabilidad afecta a toda la org</p>
+        <div class="chart-wrap h260"><canvas id="chart-sbom-shared"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════════ SECCIÓN 3: GITLEAKS ═══════════ -->
+    <div class="section-sep"><span class="sep-label">Secretos Expuestos — Gitleaks</span></div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Tipos de Secretos Detectados</h3>
+        <p class="sub">github-pat · aws-access-token · generic-api-key · private-key…</p>
+        <div class="chart-wrap h300"><canvas id="chart-gl-types"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Repositorios con más Secretos Expuestos</h3>
+        <p class="sub">Un secreto en git es permanente aunque haya sido borrado después</p>
+        <div class="chart-wrap h260"><canvas id="chart-gl-repos"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Archivos con más Secretos</h3>
+        <p class="sub">.env · config.py · fixtures suelen concentrar múltiples credenciales</p>
+        <div class="chart-wrap h260"><canvas id="chart-gl-files"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Secretos por Mes (línea de tiempo de commits)</h3>
+        <p class="sub">Picos indican eventos específicos: onboarding, migraciones, incidentes</p>
+        <div class="chart-wrap h220"><canvas id="chart-gl-timeline"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════════ SECCIÓN 4: CODEQL ═══════════ -->
+    <div class="section-sep"><span class="sep-label">Análisis Estático — CodeQL</span></div>
+
+    <div class="grid-3">
+      <div class="chart-card">
+        <h3>Hallazgos por Severidad</h3>
+        <p class="sub">High/Medium indican vulnerabilidades explotables en el código fuente</p>
+        <div class="chart-wrap h220"><canvas id="chart-codeql-sev"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Top 10 CWEs</h3>
+        <p class="sub">Common Weakness Enumeration — categorías de fallas de seguridad</p>
+        <div class="chart-wrap h220"><canvas id="chart-codeql-cwe"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Top 15 Reglas Activadas</h3>
+        <p class="sub">Reglas más frecuentes: indican patrones de código inseguro sistémico</p>
+        <div class="chart-wrap h220"><canvas id="chart-codeql-rules"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Hallazgos por Repositorio</h3>
+        <p class="sub">Top 15 repos — apilado por severidad</p>
+        <div class="chart-wrap h300"><canvas id="chart-codeql-repos"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Archivos con más Hallazgos</h3>
+        <p class="sub">Top 15 archivos — concentración de deuda de seguridad</p>
+        <div class="chart-wrap h300"><canvas id="chart-codeql-files"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════════ SECCIÓN 5: GRYPE ═══════════ -->
+    <div class="section-sep"><span class="sep-label">Vulnerabilidades de Dependencias — Grype / CVEs</span></div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>CVEs por Severidad</h3>
+        <p class="sub">Critical/High requieren parche inmediato — pueden comprometer el sistema</p>
+        <div class="chart-wrap h260"><canvas id="chart-grype-sev"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Distribución de Puntajes CVSS</h3>
+        <p class="sub">CVSS ≥ 9.0 = crítico · ≥ 7.0 = alto · ≥ 4.0 = medio</p>
+        <div class="chart-wrap h260"><canvas id="chart-grype-cvss"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Remediabilidad × Severidad</h3>
+        <p class="sub">Verde = existe fix disponible · Rojo = sin parche conocido</p>
+        <div class="chart-wrap h220"><canvas id="chart-grype-fix"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>CVEs más Extendidos (por repos)</h3>
+        <p class="sub">Top 15 CVEs por cantidad de repositorios afectados</p>
+        <div class="chart-wrap h300"><canvas id="chart-grype-spread"></canvas></div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Top 20 Paquetes con más CVEs</h3>
+      <p class="sub">Paquetes que concentran la mayoría de vulnerabilidades en la organización</p>
+      <div class="chart-wrap h260"><canvas id="chart-grype-pkgs"></canvas></div>
+    </div>
+
+  </div><!-- #dashboard -->
 </main>
 
 <footer id="footer">
@@ -521,456 +493,668 @@
 </footer>
 
 <script>
-/* ════════════════════════════════════════════════════════════════════════
-   Constantes
-════════════════════════════════════════════════════════════════════════ */
-const DATA_URL = './data/secpipeline.json';
+/* ════════════════════════════════════════════════════════════
+   Config
+════════════════════════════════════════════════════════════ */
+const DATA_URL            = './data/secpipeline.json';
 const REFRESH_INTERVAL_MS = 2_000;
 
-const SEV_WEIGHTS  = { critical: 10, high: 5, medium: 2, low: 1, negligible: 0 };
-const SEV_ORDER    = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown'];
-const SEV_COLORS   = {
-  critical:   '#ef4444', high:       '#f97316', medium:     '#eab308',
-  low:        '#22c55e', negligible: '#94a3b8', unknown:    '#475569',
+Chart.defaults.animation  = false;
+Chart.defaults.color      = '#94a3b8';
+Chart.defaults.borderColor = '#334155';
+
+/* ════════════════════════════════════════════════════════════
+   Paletas
+════════════════════════════════════════════════════════════ */
+const C_SEV = {
+  critical: '#ef4444', high: '#f97316', medium: '#eab308',
+  low: '#22c55e', negligible: '#94a3b8', unknown: '#475569',
 };
-const TOOL_COLORS  = { codeql: '#3b82f6', grype: '#f97316', gitleaks: '#ef4444', sbom: '#8b5cf6' };
-const ECO_PALETTE  = [
-  '#3b82f6','#8b5cf6','#22c55e','#f97316','#ef4444',
-  '#06b6d4','#ec4899','#84cc16','#f59e0b','#64748b',
-];
+const SEV_ORDER = ['critical','high','medium','low','negligible','unknown'];
+const ECO_PAL = ['#3b82f6','#8b5cf6','#22c55e','#f97316','#ef4444',
+                 '#06b6d4','#ec4899','#84cc16','#f59e0b','#64748b',
+                 '#a78bfa','#34d399','#fb923c','#f472b6','#60a5fa'];
+const COPYLEFT = ['gpl','lgpl','agpl','eupl','ccdl','mpl'];
 
-/* ════════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════
    Estado global
-════════════════════════════════════════════════════════════════════════ */
-let charts   = {};      // chart instances keyed by canvas id
-let tableData = [];     // flat rows for the table
-let sortCol  = 'risk_score';
-let sortAsc  = false;
-let filterQ  = '';
+════════════════════════════════════════════════════════════ */
+let charts = {};
+let tableData = [], sortCol = 'full_name', sortAsc = true, filterQ = '';
+let lastUpdatedAt = '', firstLoad = true;
 
-/* ════════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════
    Helpers
-════════════════════════════════════════════════════════════════════════ */
-function fmt(n) { return Number(n).toLocaleString('es-CL'); }
+════════════════════════════════════════════════════════════ */
+const fmt = n => Number(n).toLocaleString('es-CL');
+const sk  = s => (s || 'unknown').toLowerCase();
+const txt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
 
-function sevKey(s) { return (s || 'unknown').toLowerCase(); }
-
-function scoreClass(score) {
-  if (score >= 50) return 'score-critical';
-  if (score >= 20) return 'score-high';
-  if (score >= 5)  return 'score-medium';
-  if (score > 0)   return 'score-low';
-  return 'score-none';
+function groupCount(arr, key) {
+  const m = {};
+  for (const x of arr) { const k = sk(x[key]); m[k] = (m[k]||0)+1; }
+  return m;
 }
-
-function groupBy(arr, key) {
-  const map = {};
-  for (const item of arr) {
-    const k = sevKey(item[key]);
-    map[k] = (map[k] || 0) + 1;
-  }
-  return map;
-}
-
 function countByRepo(arr) {
-  const map = {};
-  for (const item of arr) {
-    const id = item.repo_id;
-    map[id] = (map[id] || 0) + 1;
+  const m = {};
+  for (const x of arr) { const id = x.repo_id; m[id]=(m[id]||0)+1; }
+  return m;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Chart engine — update in-place, sin destroy/recreate
+════════════════════════════════════════════════════════════ */
+function mkChart(id, type, data, options={}) {
+  const fullOpts = { responsive:true, maintainAspectRatio:false, ...options };
+
+  const canvas = document.getElementById(id);
+  if (canvas) {
+    canvas.style.display = '';
+    const ov = canvas.parentElement?.querySelector('.empty-ov');
+    if (ov) ov.style.display = 'none';
   }
-  return map;
+
+  const ex = charts[id];
+  if (ex && ex.config.type === type) {
+    ex.data.labels = data.labels;
+    const nd = data.datasets, cd = ex.data.datasets;
+    while (cd.length > nd.length) cd.pop();
+    nd.forEach((ds,i) => { if(cd[i]) Object.assign(cd[i],ds); else cd.push({...ds}); });
+    ex.update('none');
+    return;
+  }
+  if (ex) ex.destroy();
+  if (!canvas) return;
+  charts[id] = new Chart(canvas.getContext('2d'), { type, data, options: fullOpts });
 }
 
-function mkChart(id, type, data, options = {}) {
-  if (charts[id]) { charts[id].destroy(); }
-  const ctx = document.getElementById(id).getContext('2d');
-  charts[id] = new Chart(ctx, { type, data, options: { responsive: true, maintainAspectRatio: false, ...options } });
+function emptyChart(id, msg='Sin datos todavía') {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  canvas.style.display = 'none';
+  const p = canvas.parentElement;
+  let ov = p.querySelector('.empty-ov');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'empty-ov';
+    ov.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:12px;font-style:italic';
+    p.appendChild(ov);
+  }
+  ov.textContent = msg;
+  ov.style.display = 'flex';
 }
 
-/* ════════════════════════════════════════════════════════════════════════
+/* ── Grids de opciones reutilizables ── */
+const BAR_SCALES = {
+  x: { ticks:{color:'#64748b'}, grid:{color:'#334155'} },
+  y: { ticks:{color:'#94a3b8'}, grid:{display:false}   },
+};
+const BAR_SCALES_H = { // indexAxis:'y'
+  x: { ticks:{color:'#64748b'}, grid:{color:'#334155'} },
+  y: { ticks:{color:'#94a3b8', font:{size:11}}, grid:{display:false} },
+};
+const DONUT_LEGEND = { position:'right', labels:{color:'#94a3b8', boxWidth:12, padding:12, font:{size:11}} };
+
+/* ════════════════════════════════════════════════════════════
    Data loading
-════════════════════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 async function loadData() {
-  setStatus('loading', 'Actualizando…');
   try {
     const r = await fetch(DATA_URL + '?_=' + Date.now());
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const db = await r.json();
-    document.getElementById('error-state').style.display = 'none';
+
+    setHeaderAlert(null);
+    document.getElementById('dashboard').style.display = 'block';
+
+    const nowAt = db.meta?.updated_at || '';
+    const isLive = nowAt !== lastUpdatedAt && !firstLoad;
+    lastUpdatedAt = nowAt;
+    firstLoad = false;
+
+    setStatus(isLive ? 'live' : 'ok', isLive ? 'En vivo' : 'Datos cargados');
+    txt('timestamp', 'Sync: ' + new Date().toLocaleTimeString('es-CL'));
+
     renderAll(db);
-    setStatus('ok', 'Datos actualizados');
-    document.getElementById('timestamp').textContent =
-      'Último sync: ' + new Date().toLocaleTimeString('es-CL');
-  } catch (e) {
-    setStatus('error', 'Error al cargar datos');
-    document.getElementById('error-state').style.display = 'block';
-    console.error(e);
+  } catch(e) {
+    if (firstLoad) {
+      setStatus('loading', 'Esperando al miner…');
+      setHeaderAlert('loading', '⏳ Esperando datos del miner — el dashboard se actualizará automáticamente');
+    } else {
+      setStatus('error', 'Error al cargar');
+      setHeaderAlert('error', '⚠ No se pudo cargar secpipeline.json — verificá que el miner esté corriendo');
+    }
   }
 }
 
 function setStatus(state, text) {
   const dot = document.getElementById('status-dot');
-  dot.className = state === 'loading' ? 'loading' : state === 'error' ? 'error' : '';
-  document.getElementById('status-text').textContent = text;
+  dot.className = state;
+  txt('status-text', text);
 }
 
-function refresh() { loadData(); }
+function setHeaderAlert(type, msg) {
+  const el = document.getElementById('header-alert');
+  if (!type) { el.className = ''; el.textContent = ''; el.style.display = 'none'; return; }
+  el.className = type;
+  el.textContent = msg;
+}
 
-/* ════════════════════════════════════════════════════════════════════════
-   Main render
-════════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════
+   Render principal
+════════════════════════════════════════════════════════════ */
 function renderAll(db) {
-  const repos         = db.repositories      || [];
-  const codeqlF       = db.codeql_findings   || [];
-  const grypef        = db.grype_findings    || [];
-  const gitleaksF     = db.gitleaks_findings || [];
-  const sbomC         = db.sbom_components   || [];
-  const orgs          = db.organizations     || [];
+  const repos     = db.repositories      || [];
+  const codeqlF   = db.codeql_findings   || [];
+  const grypef    = db.grype_findings    || [];
+  const gitleaksF = db.gitleaks_findings || [];
+  const sbomC     = db.sbom_components   || [];
+  const orgs      = db.organizations     || [];
 
-  // Org label
-  const orgName = orgs[0]?.name || '—';
-  document.getElementById('org-label').textContent = orgName;
+  // Sets de repo_id donde cada herramienta YA corrió (scan record presente)
+  const doneCodeql   = new Set((db.codeql_scans   ||[]).map(s=>s.repo_id));
+  const doneGrype    = new Set((db.grype_scans    ||[]).map(s=>s.repo_id));
+  const doneGitleaks = new Set((db.gitleaks_scans ||[]).map(s=>s.repo_id));
+  const doneSBOM     = new Set((db.sbom_scans     ||[]).map(s=>s.repo_id));
 
-  // Repo map
-  const repoMap = {};
-  for (const r of repos) repoMap[r.id] = r;
+  renderGeneral(repos, codeqlF, grypef, gitleaksF, sbomC, doneCodeql, doneGrype, doneGitleaks, doneSBOM);
+  renderCodeQL(codeqlF, repos);
+  renderGrype(grypef, repos);
+  renderSBOM(sbomC, repos);
+  renderGitleaks(gitleaksF, repos);
+}
 
-  // Per-repo counts
+/* ════════════════════════════════════════════════════════════
+   Barras de progreso del pipeline
+════════════════════════════════════════════════════════════ */
+function renderProgress(repos, doneCodeql, doneGrype, doneGitleaks, doneSBOM) {
+  const total   = repos.length || 1;
+  const cloned  = repos.filter(r => r.miner_status === 'cloned' || r.miner_status === 'error').length;
+
+  const bars = [
+    { fill:'prog-clone', txt:'prog-clone-txt', done: cloned,             color:'var(--accent)'   },
+    { fill:'prog-gl',    txt:'prog-gl-txt',    done: doneGitleaks.size,  color:'var(--gitleaks)' },
+    { fill:'prog-sbom',  txt:'prog-sbom-txt',  done: doneSBOM.size,      color:'var(--sbom)'     },
+    { fill:'prog-grype', txt:'prog-grype-txt', done: doneGrype.size,     color:'var(--grype)'    },
+    { fill:'prog-codeql',txt:'prog-codeql-txt',done: doneCodeql.size,    color:'var(--codeql)'   },
+  ];
+
+  for (const b of bars) {
+    const pct = Math.min(Math.round((b.done / total) * 100), 100);
+    const el  = document.getElementById(b.fill);
+    if (el) el.style.width = pct + '%';
+    const ct  = document.getElementById(b.txt);
+    if (ct) ct.textContent = `${b.done} / ${total}  (${pct}%)`;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   SECCIÓN 1 — RESUMEN GENERAL
+════════════════════════════════════════════════════════════ */
+function renderGeneral(repos, codeqlF, grypef, gitleaksF, sbomC, doneCodeql, doneGrype, doneGitleaks, doneSBOM) {
+  const cloned  = repos.filter(r=>r.miner_status==='cloned').length;
+  const glRepos = new Set(gitleaksF.map(f=>f.repo_id)).size;
+  const ecos    = new Set(sbomC.map(c=>c.ecosystem).filter(Boolean)).size;
+  const critHigh = [...codeqlF,...grypef].filter(f=>['critical','high'].includes(sk(f.severity))).length;
+
+  txt('k-repos',        fmt(repos.length));
+  txt('k-repos-sub',    `${cloned} clonados · ${repos.length-cloned} pendientes`);
+  txt('k-sbom',         fmt(sbomC.length));
+  txt('k-sbom-sub',     `${ecos} ecosistemas`);
+  txt('k-gitleaks',     fmt(gitleaksF.length));
+  txt('k-gitleaks-sub', `${glRepos} repos afectados`);
+  txt('k-codeql',       fmt(codeqlF.length));
+  txt('k-codeql-sub',   `${codeqlF.filter(f=>sk(f.severity)==='high').length} altos · ${critHigh} crit+high total`);
+  txt('k-grype',        fmt(grypef.length));
+  txt('k-grype-sub',    `${grypef.filter(f=>sk(f.severity)==='critical').length} críticos`);
+
+  renderProgress(repos, doneCodeql, doneGrype, doneGitleaks, doneSBOM);
+
   const codeqlByRepo   = countByRepo(codeqlF);
   const grypefByRepo   = countByRepo(grypef);
   const gitleaksByRepo = countByRepo(gitleaksF);
   const sbomByRepo     = countByRepo(sbomC);
 
-  // Risk scores
-  function calcRisk(repoId) {
-    let score = 0;
-    for (const f of codeqlF)   { if (f.repo_id === repoId) score += SEV_WEIGHTS[sevKey(f.severity)] ?? 0; }
-    for (const f of grypef)    { if (f.repo_id === repoId) score += SEV_WEIGHTS[sevKey(f.severity)] ?? 0; }
-    score += (gitleaksByRepo[repoId] || 0) * 3;
-    return score;
-  }
-
-  /* ── Stat cards ──────────────────────────────────────────────────── */
-  const cloned     = repos.filter(r => r.miner_status === 'cloned').length;
-  const critHigh   = [...codeqlF, ...grypef].filter(f => ['critical','high'].includes(sevKey(f.severity))).length;
-
-  setText('c-repos',       fmt(repos.length));
-  setText('c-repos-sub',   `${cloned} clonados`);
-  setText('c-codeql',      fmt(codeqlF.length));
-  setText('c-codeql-sub',  sevSub(codeqlF));
-  setText('c-grype',       fmt(grypef.length));
-  setText('c-grype-sub',   sevSub(grypef));
-  setText('c-gitleaks',    fmt(gitleaksF.length));
-  setText('c-gitleaks-sub', `${repos.filter(r => gitleaksByRepo[r.id]).length} repos afectados`);
-  setText('c-sbom',        fmt(sbomC.length));
-  setText('c-sbom-sub',    `${new Set(sbomC.map(c=>c.ecosystem).filter(Boolean)).size} ecosistemas`);
-  setText('c-critical',    fmt(critHigh));
-  setText('c-critical-sub', `de ${fmt(codeqlF.length + grypef.length)} hallazgos totales`);
-
-  /* ── Donut: Severity global ──────────────────────────────────────── */
-  const sevGlobal = groupBy([
-    ...codeqlF.map(f=>({severity:f.severity})),
-    ...grypef.map(f=>({severity:f.severity})),
-    ...gitleaksF.map(()=>({severity:'unknown'})),
-  ], 'severity');
-
-  const sevLabels = SEV_ORDER.filter(s => sevGlobal[s]);
-  mkChart('chart-sev-donut', 'doughnut', {
-    labels: sevLabels.map(s => s.charAt(0).toUpperCase() + s.slice(1)),
-    datasets: [{
-      data: sevLabels.map(s => sevGlobal[s]),
-      backgroundColor: sevLabels.map(s => SEV_COLORS[s]),
-      borderColor: '#1e293b',
-      borderWidth: 2,
-    }],
-  }, {
-    plugins: {
-      legend: { position: 'right', labels: { color: '#94a3b8', boxWidth: 12, padding: 14 } },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.raw)}` } },
-    },
-    cutout: '62%',
-  });
-
-  /* ── Bar: Top 10 risk ────────────────────────────────────────────── */
-  const riskRows = repos
-    .map(r => ({ name: r.full_name?.split('/')[1] || r.name, score: calcRisk(r.id) }))
-    .filter(r => r.score > 0)
-    .sort((a,b) => b.score - a.score)
-    .slice(0, 10);
-
-  mkChart('chart-risk-bar', 'bar', {
-    labels: riskRows.map(r => r.name),
-    datasets: [{
-      label: 'Risk Score',
-      data: riskRows.map(r => r.score),
-      backgroundColor: riskRows.map(r =>
-        r.score >= 50 ? SEV_COLORS.critical :
-        r.score >= 20 ? SEV_COLORS.high :
-        r.score >= 5  ? SEV_COLORS.medium : SEV_COLORS.low
-      ),
-      borderRadius: 4,
-    }],
-  }, {
-    indexAxis: 'y',
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { color: '#64748b' }, grid: { color: '#334155' } },
-      y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } },
-    },
-  });
-
-  /* ── CodeQL severity bar ─────────────────────────────────────────── */
-  renderSevBar('chart-codeql-sev', codeqlF, TOOL_COLORS.codeql);
-
-  /* ── Grype severity bar ──────────────────────────────────────────── */
-  renderSevBar('chart-grype-sev', grypef, TOOL_COLORS.grype);
-
-  /* ── Gitleaks types ──────────────────────────────────────────────── */
-  const glTypes = {};
-  for (const f of gitleaksF) {
-    const k = f.rule_id || f.description || 'unknown';
-    glTypes[k] = (glTypes[k] || 0) + 1;
-  }
-  const glSorted = Object.entries(glTypes).sort((a,b) => b[1]-a[1]).slice(0,10);
-
-  if (glSorted.length) {
-    mkChart('chart-gitleaks-types', 'bar', {
-      labels: glSorted.map(([k]) => k.length > 22 ? k.slice(0,20)+'…' : k),
-      datasets: [{
-        data: glSorted.map(([,v]) => v),
-        backgroundColor: TOOL_COLORS.gitleaks + 'cc',
-        borderRadius: 3,
-      }],
-    }, {
-      indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#64748b' }, grid: { color: '#334155' } },
-        y: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
-      },
-    });
-  } else {
-    emptyChart('chart-gitleaks-types', 'Sin secretos detectados');
-  }
-
-  /* ── SBOM ecosistemas ────────────────────────────────────────────── */
-  const ecoMap = {};
-  for (const c of sbomC) {
-    const k = c.ecosystem || 'desconocido';
-    ecoMap[k] = (ecoMap[k] || 0) + 1;
-  }
-  const ecoSorted = Object.entries(ecoMap).sort((a,b)=>b[1]-a[1]).slice(0,10);
-
-  if (ecoSorted.length) {
-    mkChart('chart-sbom-eco', 'doughnut', {
-      labels: ecoSorted.map(([k]) => k),
-      datasets: [{
-        data: ecoSorted.map(([,v]) => v),
-        backgroundColor: ECO_PALETTE,
-        borderColor: '#1e293b',
-        borderWidth: 2,
-      }],
-    }, {
-      plugins: {
-        legend: { position: 'right', labels: { color: '#94a3b8', boxWidth: 12, padding: 10, font: { size: 11 } } },
-      },
-      cutout: '55%',
-    });
-  } else {
-    emptyChart('chart-sbom-eco', 'Sin datos SBOM');
-  }
-
-  /* ── Grype fix × severidad ───────────────────────────────────────── */
-  const fixSev = {};
-  const noFixSev = {};
-  for (const f of grypef) {
-    const sev = sevKey(f.severity);
-    const hasFix = Array.isArray(f.fix_versions) ? f.fix_versions.length > 0 : Boolean(f.fix_versions);
-    if (hasFix) fixSev[sev] = (fixSev[sev] || 0) + 1;
-    else        noFixSev[sev] = (noFixSev[sev] || 0) + 1;
-  }
-  const fixLabels = SEV_ORDER.filter(s => fixSev[s] || noFixSev[s]);
-
-  if (fixLabels.length) {
-    mkChart('chart-grype-fix', 'bar', {
-      labels: fixLabels.map(s => s.charAt(0).toUpperCase()+s.slice(1)),
-      datasets: [
-        {
-          label: 'Con fix',
-          data: fixLabels.map(s => fixSev[s] || 0),
-          backgroundColor: '#22c55eaa',
-          borderRadius: 4,
-        },
-        {
-          label: 'Sin fix',
-          data: fixLabels.map(s => noFixSev[s] || 0),
-          backgroundColor: '#ef4444aa',
-          borderRadius: 4,
-        },
-      ],
-    }, {
-      plugins: {
-        legend: { labels: { color: '#94a3b8' } },
-      },
-      scales: {
-        x: { stacked: false, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-        y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } },
-      },
-    });
-  } else {
-    emptyChart('chart-grype-fix', 'Sin datos Grype');
-  }
-
-  /* ── Table ───────────────────────────────────────────────────────── */
-  tableData = repos.map(r => {
-    const cq = codeqlByRepo[r.id] || 0;
-    const gr = grypefByRepo[r.id] || 0;
-    const gl = gitleaksByRepo[r.id] || 0;
-    const sb = sbomByRepo[r.id] || 0;
-
-    // Severity breakdown for CodeQL+Grype combined
-    const sevBreak = { critical:0, high:0, medium:0, low:0 };
-    [...codeqlF.filter(f=>f.repo_id===r.id), ...grypef.filter(f=>f.repo_id===r.id)].forEach(f=>{
-      const s = sevKey(f.severity);
-      if (s in sevBreak) sevBreak[s]++;
-    });
-
-    return {
-      id: r.id,
-      full_name: r.full_name || r.name || '',
-      name: r.name || '',
-      language: r.language || '—',
-      stars: r.stars || 0,
-      miner_status: r.miner_status || 'pending',
-      codeql_count: cq,
-      grype_count: gr,
-      sec_count: gl,
-      sbom_count: sb,
-      risk_score: calcRisk(r.id),
-      sev_break: sevBreak,
-    };
-  });
-
+  tableData = repos.map(r=>({
+    id:r.id, full_name:r.full_name||r.name||'', language:r.language||'—',
+    stars:r.stars||0, status:r.miner_status||'pending',
+    codeql_count:codeqlByRepo[r.id]||0,  codeql_done:doneCodeql.has(r.id),
+    grype_count:grypefByRepo[r.id]||0,   grype_done:doneGrype.has(r.id),
+    sec_count:gitleaksByRepo[r.id]||0,   gl_done:doneGitleaks.has(r.id),
+    sbom_count:sbomByRepo[r.id]||0,      sbom_done:doneSBOM.has(r.id),
+  }));
   renderTable();
 }
 
-/* ── Severity bar chart helper ───────────────────────────────────────── */
-function renderSevBar(id, findings, baseColor) {
-  const sevMap = groupBy(findings, 'severity');
-  const labels = SEV_ORDER.filter(s => sevMap[s]);
-
-  if (!labels.length) { emptyChart(id, 'Sin hallazgos'); return; }
-
-  mkChart(id, 'bar', {
-    labels: labels.map(s => s.charAt(0).toUpperCase()+s.slice(1)),
-    datasets: [{
-      data: labels.map(s => sevMap[s]),
-      backgroundColor: labels.map(s => SEV_COLORS[s]),
-      borderRadius: 4,
-    }],
-  }, {
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-      y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } },
-    },
-  });
-}
-
-/* ── Empty chart placeholder ─────────────────────────────────────────── */
-function emptyChart(id, msg) {
-  const canvas = document.getElementById(id);
-  if (!canvas) return;
-  const parent = canvas.parentElement;
-  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
-  parent.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:12px">${msg}</div>`;
-}
-
-/* ── Table rendering ─────────────────────────────────────────────────── */
-function renderTable() {
-  let rows = [...tableData];
-
-  // Filter
-  if (filterQ.trim()) {
-    const q = filterQ.toLowerCase();
-    rows = rows.filter(r => r.full_name.toLowerCase().includes(q) || r.language.toLowerCase().includes(q));
+/* ════════════════════════════════════════════════════════════
+   SECCIÓN 2 — CODEQL
+════════════════════════════════════════════════════════════ */
+function renderCodeQL(codeqlF, repos) {
+  if (!codeqlF.length) {
+    ['chart-codeql-sev','chart-codeql-rules','chart-codeql-cwe','chart-codeql-repos','chart-codeql-files']
+      .forEach(id=>emptyChart(id));
+    return;
   }
 
-  // Sort
-  rows.sort((a, b) => {
-    const va = a[sortCol], vb = b[sortCol];
-    if (typeof va === 'number') return sortAsc ? va - vb : vb - va;
-    return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-  });
+  // Severidad
+  const sevMap = groupCount(codeqlF,'severity');
+  const sevL = SEV_ORDER.filter(s=>sevMap[s]);
+  mkChart('chart-codeql-sev','bar',{
+    labels:sevL.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),
+    datasets:[{ data:sevL.map(s=>sevMap[s]), backgroundColor:sevL.map(s=>C_SEV[s]), borderRadius:4 }],
+  },{ plugins:{legend:{display:false}}, scales:{
+    x:{ticks:{color:'#94a3b8'},grid:{color:'#334155'}},
+    y:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+  }});
 
-  // Update header icons
-  document.querySelectorAll('thead th[data-col]').forEach(th => {
-    const col = th.dataset.col;
-    th.classList.toggle('sorted', col === sortCol);
-    const icon = th.querySelector('.sort-icon');
-    if (icon) icon.textContent = col !== sortCol ? '↕' : sortAsc ? '↑' : '↓';
-  });
+  // Top 15 reglas
+  const ruleCnt = {};
+  const ruleSev = {};
+  for (const f of codeqlF) {
+    const k = f.rule_id||'unknown';
+    ruleCnt[k]=(ruleCnt[k]||0)+1;
+    if (!ruleSev[k]) ruleSev[k]=sk(f.severity);
+  }
+  const topRules = Object.entries(ruleCnt).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (topRules.length) {
+    mkChart('chart-codeql-rules','bar',{
+      labels:topRules.map(([k])=>k.length>28?k.slice(0,26)+'…':k).reverse(),
+      datasets:[{ data:topRules.map(([,v])=>v).reverse(), borderRadius:3,
+        backgroundColor:topRules.map(([k])=>C_SEV[ruleSev[k]]||C_SEV.unknown).reverse() }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+  } else emptyChart('chart-codeql-rules');
 
-  const tbody = document.getElementById('repo-tbody');
-  tbody.innerHTML = rows.map(r => {
-    const total = r.codeql_count + r.grype_count;
-    const sev = r.sev_break;
-    const sevTotal = sev.critical + sev.high + sev.medium + sev.low;
-
-    // Mini severity bar
-    let sevBar = '<span style="color:var(--text3);font-size:11px">—</span>';
-    if (sevTotal > 0) {
-      const segs = ['critical','high','medium','low'].map(s => {
-        const w = Math.round((sev[s]/sevTotal)*60);
-        return w > 0
-          ? `<span class="sev-seg" style="width:${w}px;background:${SEV_COLORS[s]}" title="${s}: ${sev[s]}"></span>`
-          : '';
-      }).join('');
-      sevBar = `<div class="sev-bar">${segs}</div>`;
+  // Top 10 CWEs
+  const cweCnt = {};
+  for (const f of codeqlF) {
+    for (const tag of (f.cwe||[])) {
+      const m = tag.match(/cwe-(\d+)/i);
+      if (m) { const k='CWE-'+m[1]; cweCnt[k]=(cweCnt[k]||0)+1; }
     }
+  }
+  const topCWE = Object.entries(cweCnt).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if (topCWE.length) {
+    mkChart('chart-codeql-cwe','bar',{
+      labels:topCWE.map(([k])=>k).reverse(),
+      datasets:[{ data:topCWE.map(([,v])=>v).reverse(), backgroundColor:'#3b82f6cc', borderRadius:3 }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+  } else emptyChart('chart-codeql-cwe');
 
-    const pill = `<span class="score-pill ${scoreClass(r.risk_score)}">${fmt(r.risk_score)}</span>`;
+  // Hallazgos por repo (apilado)
+  const repoNames = {};
+  for (const r of repos) repoNames[r.id]=((r.full_name||r.name||'').split('/')[1]||r.name||'?');
+  const repoSev = {};
+  for (const f of codeqlF) {
+    const n = repoNames[f.repo_id]||'?';
+    if (!repoSev[n]) repoSev[n]={high:0,medium:0,low:0};
+    const s=sk(f.severity);
+    if (s in repoSev[n]) repoSev[n][s]++;
+  }
+  const repoRows = Object.entries(repoSev)
+    .map(([n,v])=>({n,total:v.high+v.medium+v.low,...v}))
+    .sort((a,b)=>b.total-a.total).slice(0,15);
+  if (repoRows.length) {
+    const labels = repoRows.map(r=>r.n).reverse();
+    mkChart('chart-codeql-repos','bar',{
+      labels,
+      datasets:[
+        {label:'High',   data:repoRows.map(r=>r.high).reverse(),   backgroundColor:C_SEV.high+'cc',   borderRadius:2},
+        {label:'Medium', data:repoRows.map(r=>r.medium).reverse(), backgroundColor:C_SEV.medium+'cc', borderRadius:2},
+        {label:'Low',    data:repoRows.map(r=>r.low).reverse(),    backgroundColor:C_SEV.low+'cc',    borderRadius:2},
+      ],
+    },{ indexAxis:'y', plugins:{legend:{labels:{color:'#94a3b8'}}}, scales:{
+      x:{stacked:true,ticks:{color:'#64748b'},grid:{color:'#334155'}},
+      y:{stacked:true,ticks:{color:'#94a3b8',font:{size:10}},grid:{display:false}},
+    }});
+  } else emptyChart('chart-codeql-repos');
 
+  // Top 15 archivos
+  const fileCnt = {};
+  for (const f of codeqlF) {
+    const p=f.file_path||''; if(!p) continue;
+    fileCnt[p]=(fileCnt[p]||0)+1;
+  }
+  const topFiles = Object.entries(fileCnt).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (topFiles.length) {
+    const shorten = p => p.length>50 ? '…'+p.slice(-48) : p;
+    mkChart('chart-codeql-files','bar',{
+      labels:topFiles.map(([k])=>shorten(k)).reverse(),
+      datasets:[{ data:topFiles.map(([,v])=>v).reverse(), backgroundColor:'#3b82f6aa', borderRadius:3 }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{
+      x:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+      y:{ticks:{color:'#94a3b8',font:{size:9}},grid:{display:false}},
+    }});
+  } else emptyChart('chart-codeql-files');
+}
+
+/* ════════════════════════════════════════════════════════════
+   SECCIÓN 3 — GRYPE / CVEs
+════════════════════════════════════════════════════════════ */
+function renderGrype(grypef, repos) {
+  const GRYPE_IDS = ['chart-grype-sev','chart-grype-cvss','chart-grype-fix','chart-grype-pkgs','chart-grype-spread'];
+  if (!grypef.length) {
+    GRYPE_IDS.forEach(id=>emptyChart(id, 'Sin CVEs registrados — puede que Grype aún no haya corrido o los repos sean limpios'));
+    return;
+  }
+
+  // Severidad — Grype guarda capitalizado: "Critical", "High", etc.
+  const SEV_GRYPE = ['Critical','High','Medium','Low','Negligible','Unknown'];
+  const sevMap = {};
+  for (const f of grypef) {
+    // Normalizar: primer carácter mayúscula para que coincida con SEV_GRYPE
+    const raw = f.severity || 'Unknown';
+    const k = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    sevMap[k] = (sevMap[k]||0) + 1;
+  }
+  const sevL = SEV_GRYPE.filter(s=>sevMap[s]);
+  if (sevL.length) {
+    mkChart('chart-grype-sev','doughnut',{
+      labels: sevL,
+      datasets:[{
+        data: sevL.map(s=>sevMap[s]),
+        backgroundColor: sevL.map(s=>C_SEV[s.toLowerCase()]||C_SEV.unknown),
+        borderColor:'#1e293b', borderWidth:2,
+      }],
+    },{ plugins:{ legend:DONUT_LEGEND, tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${fmt(ctx.raw)}`}} }, cutout:'60%' });
+  } else emptyChart('chart-grype-sev');
+
+  // CVSS histograma — bins 0–10 en pasos de 0.5; el último bin incluye exactamente 10
+  const scores = grypef.map(f=>f.cvss_score).filter(v=>v!=null);
+  if (scores.length) {
+    const STEP = 0.5;
+    const bins = Array.from({length:20}, (_,i) => i * STEP); // 0.0 … 9.5
+    const counts = bins.map((b, i) => {
+      const hi = i === bins.length - 1 ? Infinity : b + STEP;
+      return scores.filter(v => v >= b && v < hi).length;
+    });
+    const avg = scores.reduce((a,b)=>a+b,0) / scores.length;
+    mkChart('chart-grype-cvss','bar',{
+      labels: bins.map(b=>b.toFixed(1)),
+      datasets:[{
+        data: counts,
+        backgroundColor: bins.map(b => b >= 9 ? '#ef4444aa' : b >= 7 ? '#f97316aa' : b >= 4 ? '#eab308aa' : '#22c55eaa'),
+        borderRadius: 2, label:'CVEs',
+      }],
+    },{
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          title: ctx => `CVSS ${ctx[0].label}–${(parseFloat(ctx[0].label)+STEP).toFixed(1)}`,
+          afterBody: () => [`Promedio: ${avg.toFixed(2)}`],
+        }},
+      },
+      scales:{
+        x:{ticks:{color:'#64748b',maxRotation:0},grid:{color:'#334155'}},
+        y:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+      },
+    });
+  } else emptyChart('chart-grype-cvss', 'Sin puntajes CVSS disponibles para estos CVEs');
+
+  // Remediabilidad × severidad
+  const fixSev={}, noSev={};
+  for (const f of grypef) {
+    const raw = f.severity || 'Unknown';
+    const s = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    const hasFix = Array.isArray(f.fix_versions) ? f.fix_versions.length > 0 : Boolean(f.fix_versions);
+    if (hasFix) fixSev[s]=(fixSev[s]||0)+1;
+    else         noSev[s]=(noSev[s]||0)+1;
+  }
+  const fixL = ['Critical','High','Medium','Low','Negligible'].filter(s=>fixSev[s]||noSev[s]);
+  if (fixL.length) {
+    mkChart('chart-grype-fix','bar',{
+      labels: fixL,
+      datasets:[
+        {label:'Con fix',  data:fixL.map(s=>fixSev[s]||0), backgroundColor:'#22c55eaa', borderRadius:3},
+        {label:'Sin fix',  data:fixL.map(s=>noSev[s]||0),  backgroundColor:'#ef4444aa', borderRadius:3},
+      ],
+    },{ plugins:{legend:{labels:{color:'#94a3b8'}}}, scales:{
+      x:{ticks:{color:'#94a3b8'},grid:{color:'#334155'}},
+      y:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+    }});
+  } else emptyChart('chart-grype-fix');
+
+  // Top 20 paquetes con más CVEs
+  const pkgCnt = {};
+  for (const f of grypef) { const k=f.package_name||'?'; pkgCnt[k]=(pkgCnt[k]||0)+1; }
+  const topPkg = Object.entries(pkgCnt).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  if (topPkg.length) {
+    mkChart('chart-grype-pkgs','bar',{
+      labels: topPkg.map(([k])=>k).reverse(),
+      datasets:[{ data:topPkg.map(([,v])=>v).reverse(), backgroundColor:'#f97316cc', borderRadius:3 }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+  } else emptyChart('chart-grype-pkgs');
+
+  // CVEs más extendidos
+  const cveRepos = {};
+  for (const f of grypef) {
+    const id=f.vulnerability_id||'?';
+    if(!cveRepos[id]) cveRepos[id]=new Set();
+    cveRepos[id].add(f.repo_id);
+  }
+  const topCVE = Object.entries(cveRepos)
+    .map(([k,s])=>([k,s.size])).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (topCVE.length) {
+    mkChart('chart-grype-spread','bar',{
+      labels:topCVE.map(([k])=>k).reverse(),
+      datasets:[{ data:topCVE.map(([,v])=>v).reverse(), backgroundColor:'#ef4444aa', borderRadius:3, label:'Repos afectados' }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+        y:{ticks:{color:'#94a3b8',font:{size:10}},grid:{display:false}},
+      }});
+  } else emptyChart('chart-grype-spread');
+}
+
+/* ════════════════════════════════════════════════════════════
+   SECCIÓN 4 — SBOM
+════════════════════════════════════════════════════════════ */
+function renderSBOM(sbomC, repos) {
+  if (!sbomC.length) {
+    ['chart-sbom-eco','chart-sbom-lic','chart-sbom-repos','chart-sbom-shared'].forEach(id=>emptyChart(id));
+    return;
+  }
+
+  // Ecosistemas donut
+  const ecoCnt = {};
+  for (const c of sbomC) { const k=c.ecosystem||'desconocido'; ecoCnt[k]=(ecoCnt[k]||0)+1; }
+  const topEco = Object.entries(ecoCnt).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  mkChart('chart-sbom-eco','doughnut',{
+    labels:topEco.map(([k])=>k),
+    datasets:[{ data:topEco.map(([,v])=>v), backgroundColor:ECO_PAL, borderColor:'#1e293b', borderWidth:2 }],
+  },{ plugins:{legend:{...DONUT_LEGEND},tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${fmt(ctx.raw)}`}}}, cutout:'55%' });
+
+  // Licencias
+  const licCnt = {};
+  for (const c of sbomC) { if(c.license){const k=c.license; licCnt[k]=(licCnt[k]||0)+1;} }
+  const topLic = Object.entries(licCnt).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (topLic.length) {
+    const isCopyleft = k => COPYLEFT.some(p=>k.toLowerCase().includes(p));
+    mkChart('chart-sbom-lic','bar',{
+      labels:topLic.map(([k])=>k).reverse(),
+      datasets:[{ data:topLic.map(([,v])=>v).reverse(), borderRadius:3,
+        backgroundColor:topLic.map(([k])=>isCopyleft(k)?'#f97316cc':'#8b5cf6aa').reverse() }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+  } else emptyChart('chart-sbom-lic');
+
+  // Componentes por repo
+  const repoNames = {};
+  for (const r of repos) repoNames[r.id]=((r.full_name||r.name||'').split('/')[1]||r.name||'?');
+  const repoCnt = {};
+  for (const c of sbomC) {
+    const n=repoNames[c.repo_id]||'?'; repoCnt[n]=(repoCnt[n]||0)+1;
+  }
+  const repoRows = Object.entries(repoCnt).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (repoRows.length) {
+    mkChart('chart-sbom-repos','bar',{
+      labels:repoRows.map(([k])=>k),
+      datasets:[{ data:repoRows.map(([,v])=>v), backgroundColor:'#8b5cf6cc', borderRadius:4, label:'Componentes' }],
+    },{ plugins:{legend:{display:false}}, scales:{
+      x:{ticks:{color:'#94a3b8',maxRotation:30,font:{size:10}},grid:{color:'#334155'}},
+      y:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+    }});
+  } else emptyChart('chart-sbom-repos');
+
+  // Dependencias compartidas
+  const pkgRepos = {};
+  for (const c of sbomC) {
+    const k=c.name||'?';
+    if(!pkgRepos[k]) pkgRepos[k]=new Set();
+    pkgRepos[k].add(c.repo_id);
+  }
+  const shared = Object.entries(pkgRepos)
+    .filter(([,s])=>s.size>1).map(([k,s])=>([k,s.size]))
+    .sort((a,b)=>b[1]-a[1]).slice(0,15);
+  if (shared.length) {
+    mkChart('chart-sbom-shared','bar',{
+      labels:shared.map(([k])=>k).reverse(),
+      datasets:[{ data:shared.map(([,v])=>v).reverse(), backgroundColor:'#06b6d4aa', borderRadius:3, label:'Repos' }],
+    },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+  } else emptyChart('chart-sbom-shared');
+}
+
+/* ════════════════════════════════════════════════════════════
+   SECCIÓN 5 — GITLEAKS
+════════════════════════════════════════════════════════════ */
+function renderGitleaks(gitleaksF, repos) {
+  if (!gitleaksF.length) {
+    ['chart-gl-types','chart-gl-repos','chart-gl-files','chart-gl-timeline'].forEach(id=>emptyChart(id));
+    return;
+  }
+  const repoNames = {};
+  for (const r of repos) repoNames[r.id]=((r.full_name||r.name||'').split('/')[1]||r.name||'?');
+
+  // Tipos de secretos
+  const typeCnt = {};
+  for (const f of gitleaksF) { const k=f.rule_id||f.description||'unknown'; typeCnt[k]=(typeCnt[k]||0)+1; }
+  const topTypes = Object.entries(typeCnt).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  mkChart('chart-gl-types','bar',{
+    labels:topTypes.map(([k])=>k.length>28?k.slice(0,26)+'…':k).reverse(),
+    datasets:[{ data:topTypes.map(([,v])=>v).reverse(), backgroundColor:'#ef4444cc', borderRadius:3 }],
+  },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+
+  // Repos con más secretos
+  const repoCnt = {};
+  for (const f of gitleaksF) { const n=repoNames[f.repo_id]||'?'; repoCnt[n]=(repoCnt[n]||0)+1; }
+  const topRepos = Object.entries(repoCnt).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  mkChart('chart-gl-repos','bar',{
+    labels:topRepos.map(([k])=>k).reverse(),
+    datasets:[{ data:topRepos.map(([,v])=>v).reverse(), backgroundColor:'#f97316cc', borderRadius:3 }],
+  },{ indexAxis:'y', plugins:{legend:{display:false}}, scales:BAR_SCALES_H });
+
+  // Archivos con más secretos — clave compuesta repo+archivo para no mezclar repos
+  const fileCnt = {};
+  const fileRepo = {};
+  for (const f of gitleaksF) {
+    const p = f.file_path||''; if (!p) continue;
+    const repo = repoNames[f.repo_id]||'?';
+    const key = repo + '::' + p;
+    fileCnt[key] = (fileCnt[key]||0) + 1;
+    fileRepo[key] = repo;
+  }
+  const topFiles = Object.entries(fileCnt).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if (topFiles.length) {
+    const shortLabel = key => {
+      const [repo, p] = key.split('::');
+      const fname = p.length > 38 ? '…' + p.slice(-36) : p;
+      return `${repo}  ${fname}`;
+    };
+    mkChart('chart-gl-files','bar',{
+      labels:topFiles.map(([k])=>shortLabel(k)).reverse(),
+      datasets:[{ data:topFiles.map(([,v])=>v).reverse(), backgroundColor:'#eab308cc', borderRadius:3 }],
+    },{ indexAxis:'y', plugins:{legend:{display:false},tooltip:{callbacks:{
+      title: ctx => {
+        const key = topFiles[topFiles.length - 1 - ctx[0].dataIndex]?.[0] || '';
+        const [, p] = key.split('::');
+        return p;
+      },
+    }}}, scales:{
+      x:{ticks:{color:'#64748b'},grid:{color:'#334155'}},
+      y:{ticks:{color:'#94a3b8',font:{size:9}},grid:{display:false}},
+    }});
+  } else emptyChart('chart-gl-files');
+
+  // Línea de tiempo por mes
+  const monthCnt = {};
+  for (const f of gitleaksF) {
+    if (!f.date) continue;
+    const m = f.date.slice(0,7); // YYYY-MM
+    monthCnt[m]=(monthCnt[m]||0)+1;
+  }
+  const months = Object.keys(monthCnt).sort();
+  if (months.length) {
+    mkChart('chart-gl-timeline','line',{
+      labels:months,
+      datasets:[{
+        label:'Commits con secretos', data:months.map(m=>monthCnt[m]),
+        borderColor:'#ef4444', backgroundColor:'rgba(239,68,68,.15)',
+        pointBackgroundColor:'#ef4444', pointRadius:3, fill:true, tension:.35,
+      }],
+    },{ plugins:{legend:{display:false}}, scales:{
+      x:{ticks:{color:'#64748b',maxRotation:45,font:{size:10}},grid:{color:'#334155'}},
+      y:{ticks:{color:'#64748b'},grid:{color:'#334155'},min:0},
+    }});
+  } else emptyChart('chart-gl-timeline');
+}
+
+/* ════════════════════════════════════════════════════════════
+   Tabla de repos
+════════════════════════════════════════════════════════════ */
+function renderTable() {
+  let rows = [...tableData];
+  if (filterQ.trim()) {
+    const q = filterQ.toLowerCase();
+    rows = rows.filter(r=>r.full_name.toLowerCase().includes(q)||r.language.toLowerCase().includes(q));
+  }
+  rows.sort((a,b)=>{
+    const va=a[sortCol],vb=b[sortCol];
+    if (typeof va==='number') return sortAsc?va-vb:vb-va;
+    return sortAsc?String(va).localeCompare(String(vb)):String(vb).localeCompare(String(va));
+  });
+  document.querySelectorAll('thead th[data-col]').forEach(th=>{
+    const col=th.dataset.col;
+    th.classList.toggle('sorted',col===sortCol);
+    const si=th.querySelector('.si');
+    if(si) si.textContent=col!==sortCol?'↕':sortAsc?'↑':'↓';
+  });
+
+  const wrap  = document.querySelector('.table-wrap');
+  const scrollX = wrap ? wrap.scrollLeft : 0;
+  const tbody = document.getElementById('repo-tbody');
+  const n0 = (count, done) => {
+    const num = count > 0
+      ? `<span style="color:inherit">${fmt(count)}</span>`
+      : `<span style="color:var(--text3)">0</span>`;
+    const icon = done
+      ? `<span style="color:#64748b;font-size:10px;margin-left:5px" title="Análisis completado">✓</span>`
+      : `<span style="color:#475569;font-size:10px;margin-left:5px" title="Análisis pendiente">✗</span>`;
+    return num + icon;
+  };
+  tbody.innerHTML = rows.map(r=>{
+    const stClass={'cloned':'st-cloned','cloning':'st-cloning','pending':'st-pending','error':'st-error'}[r.status]||'st-pending';
+    const stLabel={'cloned':'clonado','cloning':'analizando','pending':'pendiente','error':'error'}[r.status]||r.status;
     return `<tr>
       <td class="name" title="${r.full_name}">${r.full_name}</td>
       <td><span class="lang-badge">${r.language}</span></td>
-      <td class="num">${r.stars > 0 ? '★ '+fmt(r.stars) : '—'}</td>
-      <td class="num" style="color:var(--codeql)">${r.codeql_count > 0 ? fmt(r.codeql_count) : '<span style="color:var(--text3)">0</span>'}</td>
-      <td class="num" style="color:var(--grype)">${r.grype_count > 0 ? fmt(r.grype_count) : '<span style="color:var(--text3)">0</span>'}</td>
-      <td class="num" style="color:var(--gitleaks)">${r.sec_count > 0 ? fmt(r.sec_count) : '<span style="color:var(--text3)">0</span>'}</td>
-      <td class="num" style="color:var(--sbom)">${r.sbom_count > 0 ? fmt(r.sbom_count) : '<span style="color:var(--text3)">0</span>'}</td>
-      <td class="num">${pill}</td>
-      <td>${sevBar}</td>
+      <td class="num">${r.stars>0?'★ '+fmt(r.stars):'—'}</td>
+      <td><span class="status-badge ${stClass}">${stLabel}</span></td>
+      <td class="num" style="color:var(--codeql)">${n0(r.codeql_count, r.codeql_done)}</td>
+      <td class="num" style="color:var(--grype)">${n0(r.grype_count, r.grype_done)}</td>
+      <td class="num" style="color:var(--gitleaks)">${n0(r.sec_count, r.gl_done)}</td>
+      <td class="num" style="color:var(--sbom)">${n0(r.sbom_count, r.sbom_done)}</td>
     </tr>`;
   }).join('');
-
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px">Sin resultados</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">Sin resultados</td></tr>';
   }
+  if (wrap) wrap.scrollLeft = scrollX;
 }
+function sortTable(col) { if(sortCol===col) sortAsc=!sortAsc; else{sortCol=col;sortAsc=false;} renderTable(); }
+function filterTable(q) { filterQ=q; renderTable(); }
 
-function sortTable(col) {
-  if (sortCol === col) sortAsc = !sortAsc;
-  else { sortCol = col; sortAsc = false; }
-  renderTable();
-}
-
-function filterTable(q) { filterQ = q; renderTable(); }
-
-/* ── setText helper ──────────────────────────────────────────────────── */
-function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
-
-/* ── sevSub: severity breakdown for cards ────────────────────────────── */
-function sevSub(findings) {
-  const c = findings.filter(f => sevKey(f.severity) === 'critical').length;
-  const h = findings.filter(f => sevKey(f.severity) === 'high').length;
-  if (c || h) return `${c} críticos · ${h} altos`;
-  return `${findings.length} detectados`;
-}
-
-/* ════════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════
    Boot
-════════════════════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 loadData();
 setInterval(loadData, REFRESH_INTERVAL_MS);
 </script>

@@ -48,47 +48,65 @@ pytest tests/ -v --cov=miner  # With coverage
 pytest tests/test_pipeline.py -v  # Single test file
 ```
 
-Tests use `respx` to mock GitHub API calls and mock subprocesses for pipeline stages.
+Tests use `respx` to mock GitHub API calls and `pytest-mock` to mock subprocesses for pipeline stages. `asyncio_mode = "auto"` is set in `pyproject.toml` so no `@pytest.mark.asyncio` decorator is needed.
+
+## Linting and Type Checking
+
+```bash
+cd miner
+ruff check miner/          # Lint
+ruff format miner/         # Auto-format
+mypy miner/                # Type check (strict mode)
+```
 
 ## Architecture
 
+The pipeline runs in **three sequential phases**, each using `asyncio.Queue` to fan work across parallel workers:
+
 ```
-GitHub API
+Phase 1 — Clone (clone_workers)
+    ↓ feeds two queues simultaneously
+Phase 2 — Gitleaks (gitleaks_workers) + SBOM/Syft (sbom_workers) [parallel]
+    ↓ SBOM success feeds two more queues
+Phase 3 — Grype (grype_workers) + CodeQL (codeql_workers) [parallel]
     ↓
-miner/ (async pipeline with asyncio.Queue)
-  [1] Clone repos  →  [2] Gitleaks  →  [3] Syft (SBOM)  →  [4] Grype (CVEs) + [5] CodeQL
+/data/secpipeline.json   ←  written to disk after every DB operation
     ↓
-/data/secpipeline.json
-    ↓
-analyzers/*.ipynb          data-visualizer/ (auto-refreshes every 2s)
+analyzers/*.ipynb          data-visualizer/ (polls secpipeline.json every 2s)
 ```
 
-Stages 4 and 5 (Grype + CodeQL) run in parallel after stage 3 (SBOM). Each stage has configurable worker counts via env vars.
+Each phase completes fully before the next begins — `Pipeline.run()` in `pipeline.py` does `asyncio.gather()` per phase, not a single streaming gather.
 
 ### Key Files
 
 | File | Role |
 |---|---|
-| `miner/miner/__main__.py` | CLI entrypoint, arg parsing, orchestration loop |
-| `miner/miner/miner.py` | `GitHubClient` (API + retry), `GitHubMiner` (repo selection logic) |
-| `miner/miner/pipeline.py` | `Pipeline` class with 5 async stage workers and `asyncio.Queue` |
-| `miner/miner/db.py` | JSON dataset persistence; all `save_*` methods write to `secpipeline.json` |
+| `miner/miner/__main__.py` | CLI entrypoint, arg parsing, `ColorFormatter` logging, orchestration loop |
+| `miner/miner/miner.py` | `GitHubClient` (API + retry via tenacity), `GitHubMiner` (repo selection), `clone_or_update_repo` |
+| `miner/miner/pipeline.py` | `Pipeline` class with 5 async stage workers; `StageResult` dataclass |
+| `miner/miner/db.py` | `Database` class — in-memory JSON store with `asyncio.Lock`; flushes to disk on every write |
 | `miner/miner/models.py` | `Organization` and `Repository` dataclasses with `from_api()` constructors |
 | `data-visualizer/index.html` | Dashboard (Chart.js, vanilla ES6, no build tools) |
-| `data-visualizer/serve.py` | HTTP server that serves `index.html` and proxies `/data/` to `DATA_ROOT` |
+| `data-visualizer/serve.py` | HTTP server: serves `index.html` from its own directory, proxies `/data/*` to `DATA_ROOT` |
 
-### Repo selection logic (`miner.py:_collect_repos`)
+### Non-obvious patterns
 
-Fetches `REPO_LIMIT × 4` repos sorted by push date. Filters by `REPO_RECENT_DAYS`. If enough recent repos exist, sorts by stars and takes the top `REPO_LIMIT`; otherwise pads with most-starred inactive repos.
+**Queue shutdown sentinel** — `_DONE = None` in `pipeline.py`. After each phase, the orchestrator injects one `None` per worker into the queue; workers break their loop on `None`. This prevents a fast worker from closing downstream queues before slower peers finish.
+
+**DB flush-on-write** — `Database._flush_unlocked()` rewrites the entire JSON file after every `save_*` call. There is no explicit commit step. This means `secpipeline.json` is always up-to-date and the visualizer sees live data with no extra work.
+
+**serve.py proxy** — In the Dev Container the data lives at `/data/` but the visualizer HTML is in `data-visualizer/`. `serve.py` intercepts any request to `/data/*` and reads from `DATA_ROOT` (defaults to `/data`), then falls back to `SimpleHTTPRequestHandler` for everything else. In Docker Compose the volume is mounted inside the serve directory so no proxy is needed.
+
+**Repo selection** (`miner.py:GitHubMiner._collect_repos`) — Fetches `REPO_LIMIT × 4` repos sorted by push date. Filters by `REPO_RECENT_DAYS`. If enough recent repos exist, sorts by stars and takes the top `REPO_LIMIT`; otherwise pads with most-starred inactive repos.
 
 ### Output Dataset (`/data/secpipeline.json`)
 
-Full collection list (from `db._COLLECTIONS`):
+Collections defined in `db._COLLECTIONS`:
 
 | Collection | Content |
 |---|---|
 | `organizations` | Org metadata |
-| `repositories` | Repo state, clone path, last commit SHA |
+| `repositories` | Repo state (`miner_status`), clone path, last commit SHA |
 | `gitleaks_scans` | Per-repo scan record (timestamp, findings_count) |
 | `gitleaks_findings` | Secret findings: rule_id, file_path, line, author, commit |
 | `sbom_scans` | Per-repo SBOM generation record |
@@ -99,7 +117,9 @@ Full collection list (from `db._COLLECTIONS`):
 | `codeql_findings` | Static findings: rule_id, cwe[], severity, file_path, start_line |
 | `pipeline_runs` | Reserved; currently never written |
 
-Risk score formula used in notebooks and dashboard: `Critical×10 + High×5 + Medium×2 + Low×1 + Secret×3`.
+Risk score formula (notebooks + dashboard): `Critical×10 + High×5 + Medium×2 + Low×1 + Secret×3`.
+
+`Repository.miner_status` tracks per-repo pipeline state: `pending` → `cloning` → `cloned` → `error`.
 
 ## Environment Variables
 
@@ -116,7 +136,7 @@ Risk score formula used in notebooks and dashboard: `Critical×10 + High×5 + Me
 - `CLONE_WORKERS` — `5`
 - `GITLEAKS_WORKERS`, `SBOM_WORKERS`, `GRYPE_WORKERS` — `2` each
 - `CODEQL_WORKERS` — `1` (CPU-intensive; keep low)
-- `CLONE_DEPTH` — `none` (set to `1` for shallow clones; note: shallow clones reduce Gitleaks effectiveness)
+- `CLONE_DEPTH` — `none` (set to `1` for shallow clones; reduces Gitleaks effectiveness)
 - `RUN_CONTINUOUS` / `RUN_INTERVAL_SECONDS` — for continuous mode
 
 ## Analysis Notebooks

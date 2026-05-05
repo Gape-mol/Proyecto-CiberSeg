@@ -227,14 +227,11 @@ async def clone_or_update_repo(
 
     try:
         if (dest / ".git").exists():
-            logger.info(f"[{repo.full_name}] Actualizando (fetch)…")
             await _git_fetch(dest, timeout)
         else:
             if dest.exists():
-                # Directorio huérfano de un clone fallido o interrumpido — limpiar
                 logger.warning(f"[{repo.full_name}] Directorio sin .git encontrado, limpiando…")
                 shutil.rmtree(dest)
-            logger.info(f"[{repo.full_name}] Clonando…")
             dest.mkdir(parents=True, exist_ok=True)
             await _git_clone(clone_url, dest, depth, timeout)
 
@@ -260,11 +257,11 @@ def _auth_clone_url(clone_url: str, token: str) -> str:
 
 
 async def _git_clone(url: str, dest: Path, depth: int | None, timeout: int) -> None:
-    cmd = ["git", "clone", "--progress"]
+    cmd = ["git", "clone"]
     if depth is not None:
         cmd += ["--depth", str(depth)]
     cmd += [url, str(dest)]
-    await _run_git(cmd, timeout=timeout, stream_progress=True)
+    await _run_git(cmd, timeout=timeout, stream_progress=False)
 
 
 async def _git_fetch(dest: Path, timeout: int) -> None:
