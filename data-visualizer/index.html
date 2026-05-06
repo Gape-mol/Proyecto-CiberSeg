@@ -239,38 +239,17 @@
     }
     .prog-count { font-size: 11px; color: var(--text3); white-space: nowrap; min-width: 70px; text-align: right; }
 
-    /* ── Live Activity ───────────────────────────────────────── */
-    #live-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 14px 18px;
-      margin-bottom: var(--gap);
-    }
-    #live-card.all-done { border-color: #22c55e55; }
-    #live-card h3 { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 10px; }
-    .live-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 4px 0; border-bottom: 1px solid #1e293b;
-      font-size: 12px;
-    }
-    .live-row:last-child { border-bottom: none; }
-    .live-name {
-      flex: 1; min-width: 0; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; color: var(--text);
-    }
-    .live-stages { display: flex; gap: 4px; flex-shrink: 0; }
+    /* ── Pipeline stage chips (usados en la tabla) ──────────── */
+    .live-stages { display: flex; gap: 3px; flex-wrap: nowrap; }
     .s-chip {
       display: inline-flex; align-items: center; gap: 2px;
-      padding: 2px 6px; border-radius: 4px;
+      padding: 2px 5px; border-radius: 4px;
       font-size: 10px; font-weight: 600; white-space: nowrap;
     }
     .s-done    { background: rgba(34,197,94,.13);  color: #22c55e; }
     .s-active  { background: rgba(234,179,8,.13);  color: #eab308; animation: pulse 1.4s ease-in-out infinite; }
     .s-wait    { background: rgba(71,85,105,.13);  color: #475569; }
     .s-error   { background: rgba(239,68,68,.13);  color: #ef4444; }
-    #live-msg  { font-size: 12px; color: var(--text3); text-align: center; padding: 8px 0; }
-
-    /* Espacio extra antes de la tabla de comparación */
-    #table-card { margin-top: 12px; }
 
     /* ── Responsive ──────────────────────────────────────────── */
     @media (max-width: 1000px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
@@ -366,12 +345,6 @@
       </div>
     </div>
 
-    <!-- ═══════════ SECCIÓN: ACTIVIDAD EN TIEMPO REAL ═══════════ -->
-    <div id="live-card">
-      <h3>⚡ Actividad del Pipeline</h3>
-      <div id="live-body"><div id="live-msg">Esperando datos…</div></div>
-    </div>
-
     <div id="table-card">
       <div id="table-header">
         <h3>Comparación de Repositorios</h3>
@@ -381,9 +354,8 @@
         <table id="repo-table">
           <thead><tr>
             <th onclick="sortTable('full_name')"    data-col="full_name"    class="tip-right" data-tip="Nombre completo del repositorio\nen la organización de GitHub.">    Repositorio    <span class="si">↕</span></th>
-            <th onclick="sortTable('language')"     data-col="language"     class="tip-right" data-tip="Lenguaje de programación principal\ndetectado por GitHub.">     Lenguaje       <span class="si">↕</span></th>
             <th onclick="sortTable('stars')"        data-col="stars"        data-tip="Estrellas en GitHub.\nIndica popularidad del repositorio.">        Stars          <span class="si">↕</span></th>
-            <th onclick="sortTable('status')"       data-col="status"       data-tip="Estado del pipeline:\n• pendiente — en cola\n• analizando — clonando/procesando\n• clonado — listo\n• error — falló algún paso">       Estado         <span class="si">↕</span></th>
+            <th data-tip="Estado de cada etapa del pipeline:\n✓ completado · ⏳ en proceso · · pendiente · ✗ error">Pipeline</th>
             <th onclick="sortTable('codeql_count')" data-col="codeql_count" data-tip="Hallazgos de CodeQL (análisis estático).\nDetecta vulnerabilidades en el código fuente:\ninyecciones, XSS, path traversal, etc.\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">  CodeQL         <span class="si">↕</span></th>
             <th onclick="sortTable('grype_count')"  data-col="grype_count"  data-tip="CVEs detectados por Grype en dependencias.\nCompara los paquetes del repo contra bases de\ndatos de vulnerabilidades (NVD, GHSA, OSV).\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">  CVEs           <span class="si">↕</span></th>
             <th onclick="sortTable('sec_count')"    data-col="sec_count"    data-tip="Secretos expuestos detectados por Gitleaks.\nBusca tokens, API keys, contraseñas y\ncertificados hardcodeados en el historial git.\n✓ = proceso terminó sin hallazgos\n— = proceso aún no ejecutado">    Secretos       <span class="si">↕</span></th>
@@ -694,7 +666,6 @@ function renderAll(db) {
   const doneGitleaks = new Set((db.gitleaks_scans ||[]).map(s=>s.repo_id));
   const doneSBOM     = new Set((db.sbom_scans     ||[]).map(s=>s.repo_id));
 
-  renderLiveActivity(db);
   renderGeneral(repos, codeqlF, grypef, gitleaksF, sbomC, doneCodeql, doneGrype, doneGitleaks, doneSBOM);
   renderCodeQL(codeqlF, repos);
   renderGrype(grypef, repos);
@@ -1137,11 +1108,25 @@ function renderGitleaks(gitleaksF, repos) {
 /* ════════════════════════════════════════════════════════════
    Tabla de repos
 ════════════════════════════════════════════════════════════ */
+function chip(label, state) {
+  const icon = state === 'done' ? '✓' : state === 'active' ? '⏳' : state === 'error' ? '✗' : '·';
+  return `<span class="s-chip s-${state}" title="${label}">${icon} ${label}</span>`;
+}
+function repoStageChips(r) {
+  const cloned = r.status === 'cloned';
+  const c  = cloned ? 'done' : r.status === 'cloning' ? 'active' : r.status === 'error' ? 'error' : 'wait';
+  const g  = cloned ? (r.gl_done     ? 'done' : 'active') : 'wait';
+  const s  = cloned ? (r.sbom_done   ? 'done' : 'active') : 'wait';
+  const gr = cloned ? (r.sbom_done   ? (r.grype_done  ? 'done' : 'active') : 'wait') : 'wait';
+  const cq = cloned ? (r.codeql_done ? 'done' : 'active') : 'wait';
+  return `<div class="live-stages">${chip('Clone',c)}${chip('Gitleaks',g)}${chip('SBOM',s)}${chip('Grype',gr)}${chip('CodeQL',cq)}</div>`;
+}
+
 function renderTable() {
   let rows = [...tableData];
   if (filterQ.trim()) {
     const q = filterQ.toLowerCase();
-    rows = rows.filter(r=>r.full_name.toLowerCase().includes(q)||r.language.toLowerCase().includes(q));
+    rows = rows.filter(r => r.full_name.toLowerCase().includes(q));
   }
   rows.sort((a,b)=>{
     const va=a[sortCol],vb=b[sortCol];
@@ -1167,129 +1152,23 @@ function renderTable() {
       : `<span style="color:#475569;font-size:10px;margin-left:5px" title="Análisis pendiente">✗</span>`;
     return num + icon;
   };
-  tbody.innerHTML = rows.map(r=>{
-    const stClass={'cloned':'st-cloned','cloning':'st-cloning','pending':'st-pending','error':'st-error'}[r.status]||'st-pending';
-    const stLabel={'cloned':'clonado','cloning':'analizando','pending':'pendiente','error':'error'}[r.status]||r.status;
-    return `<tr>
-      <td class="name" title="${r.full_name}">${r.full_name}</td>
-      <td><span class="lang-badge">${r.language}</span></td>
-      <td class="num">${r.stars>0?'★ '+fmt(r.stars):'—'}</td>
-      <td><span class="status-badge ${stClass}">${stLabel}</span></td>
-      <td class="num" style="color:var(--codeql)">${n0(r.codeql_count, r.codeql_done)}</td>
-      <td class="num" style="color:var(--grype)">${n0(r.grype_count, r.grype_done)}</td>
-      <td class="num" style="color:var(--gitleaks)">${n0(r.sec_count, r.gl_done)}</td>
-      <td class="num" style="color:var(--sbom)">${n0(r.sbom_count, r.sbom_done)}</td>
-    </tr>`;
-  }).join('');
+  tbody.innerHTML = rows.map(r=>`<tr>
+    <td class="name" title="${r.full_name}">${r.full_name}</td>
+    <td class="num">${r.stars>0?'★ '+fmt(r.stars):'—'}</td>
+    <td>${repoStageChips(r)}</td>
+    <td class="num" style="color:var(--codeql)">${n0(r.codeql_count, r.codeql_done)}</td>
+    <td class="num" style="color:var(--grype)">${n0(r.grype_count, r.grype_done)}</td>
+    <td class="num" style="color:var(--gitleaks)">${n0(r.sec_count, r.gl_done)}</td>
+    <td class="num" style="color:var(--sbom)">${n0(r.sbom_count, r.sbom_done)}</td>
+  </tr>`).join('');
   if (!rows.length) {
-    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">Sin resultados</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin resultados</td></tr>';
   }
   if (wrap) wrap.scrollLeft = scrollX;
 }
 function sortTable(col) { if(sortCol===col) sortAsc=!sortAsc; else{sortCol=col;sortAsc=false;} renderTable(); }
 function filterTable(q) { filterQ=q; renderTable(); }
 
-/* ════════════════════════════════════════════════════════════
-   Live Activity
-════════════════════════════════════════════════════════════ */
-function renderLiveActivity(db) {
-  const repos    = db.repositories    || [];
-  const gitSc    = db.gitleaks_scans  || [];
-  const sbomSc   = db.sbom_scans      || [];
-  const grypeSc  = db.grype_scans     || [];
-  const codeqlSc = db.codeql_scans    || [];
-
-  const doneGit    = new Set(gitSc.map(s => s.repo_id));
-  const doneSbom   = new Set(sbomSc.map(s => s.repo_id));
-  const doneGrype  = new Set(grypeSc.map(s => s.repo_id));
-  const doneCodeql = new Set(codeqlSc.map(s => s.repo_id));
-
-  // Calcula el estado de cada etapa para un repo
-  function stages(r) {
-    const id = r.id;
-    const st = r.miner_status;
-    const cloned  = st === 'cloned';
-    const cloning = st === 'cloning';
-    return {
-      clone:   cloned  ? 'done' : cloning ? 'active' : st === 'error' ? 'error' : 'wait',
-      git:     cloned  ? (doneGit.has(id)    ? 'done' : 'active') : 'wait',
-      sbom:    cloned  ? (doneSbom.has(id)   ? 'done' : 'active') : 'wait',
-      grype:   cloned  ? (doneSbom.has(id) ? (doneGrype.has(id) ? 'done' : 'active') : 'wait') : 'wait',
-      codeql:  cloned  ? (doneCodeql.has(id) ? 'done' : 'active') : 'wait',
-    };
-  }
-
-  function allStagesDone(r) {
-    const s = stages(r);
-    return s.clone === 'done' && s.git === 'done' && s.sbom === 'done' && s.codeql === 'done';
-  }
-
-  function chip(label, state) {
-    const icon = state === 'done' ? '✓' : state === 'active' ? '⏳' : state === 'error' ? '✗' : '·';
-    return `<span class="s-chip s-${state}">${icon} ${label}</span>`;
-  }
-
-  // Orden: clonando → analizando (incompleto) → completos → pendientes → error
-  const priority = { cloning: 0, cloned: 1, pending: 3, error: 4 };
-  const sorted = [...repos].sort((a, b) => {
-    const pa = priority[a.miner_status] ?? 3;
-    const pb = priority[b.miner_status] ?? 3;
-    if (pa !== pb) return pa - pb;
-    // Dentro de cloned: incompletos primero
-    if (a.miner_status === 'cloned' && b.miner_status === 'cloned') {
-      return (allStagesDone(a) ? 1 : 0) - (allStagesDone(b) ? 1 : 0);
-    }
-    return 0;
-  });
-
-  const active  = sorted.filter(r => !allStagesDone(r) && r.miner_status !== 'error');
-  const allDone = repos.length > 0 && repos.every(r => allStagesDone(r) || r.miner_status === 'error');
-  const card    = document.getElementById('live-card');
-  const body    = document.getElementById('live-body');
-  if (!body || !card) return;
-  card.className = allDone ? 'all-done' : '';
-
-  if (repos.length === 0) {
-    body.innerHTML = '<div id="live-msg">Esperando datos del miner…</div>';
-    return;
-  }
-
-  // Mostrar activos + últimos 3 completados como contexto
-  const recent  = sorted.filter(allStagesDone).slice(-3);
-  const shown   = [...active, ...recent].slice(0, 30);
-
-  let html = '';
-  for (const r of shown) {
-    const s    = stages(r);
-    const done = allStagesDone(r);
-    const name = r.full_name || r.name || '?';
-    html += `<div class="live-row">
-      <span class="live-name" title="${name}">${name}</span>
-      <div class="live-stages">
-        ${chip('Clone',    s.clone)}
-        ${chip('Gitleaks', s.git)}
-        ${chip('SBOM',     s.sbom)}
-        ${chip('Grype',    s.grype)}
-        ${chip('CodeQL',   s.codeql)}
-      </div>
-    </div>`;
-  }
-
-  if (active.length > 30) {
-    html += `<div id="live-msg">… y ${active.length - 30} repos más en proceso</div>`;
-  }
-
-  if (allDone) {
-    const ok  = repos.filter(allStagesDone).length;
-    const err = repos.filter(r => r.miner_status === 'error').length;
-    html += `<div id="live-msg" style="color:#22c55e">
-      ✓ Pipeline completado — ${ok}/${repos.length} repos analizados
-      ${err ? `· <span style="color:var(--critical)">${err} con error</span>` : ''}
-    </div>`;
-  }
-
-  body.innerHTML = html;
-}
 
 /* ════════════════════════════════════════════════════════════
    Boot
