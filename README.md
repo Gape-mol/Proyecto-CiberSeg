@@ -8,7 +8,7 @@ los resultados en un dataset JSON estructurado.
 
 | Componente  | Estado | Descripción |
 |-------------|--------|-------------|
-| **Miner**      | ✅ Implementado | Pipeline async: clone → Gitleaks → Syft → Grype → CodeQL |
+| **Miner**      | ✅ Implementado | Pipeline por repo: clone → analisis paralelo (Gitleaks/SBOM/CodeQL) → Grype tras SBOM |
 | **Analyzer**   | ✅ Implementado | 5 notebooks: overview, CodeQL, Grype, SBOM, Gitleaks |
 | **Visualizer** | ✅ Implementado | Dashboard HTML/JS con auto-refresh cada 2 s |
 
@@ -134,11 +134,11 @@ Solo `GITHUB_TOKEN` y `GITHUB_ORG` son obligatorias; el resto tiene defaults raz
 | `DB_PATH` | Ruta al dataset JSON | `/data/secpipeline.json` |
 | `CLONE_ROOT` | Directorio raíz para repos clonados | `/data/repos` |
 | `REPORTS_ROOT` | Directorio para reportes JSON/SARIF | `/data/reports` |
-| `CLONE_WORKERS` | Repos clonados en paralelo | `5` |
-| `GITLEAKS_WORKERS` | Workers de Gitleaks en paralelo | `2` |
-| `SBOM_WORKERS` | Workers de Syft en paralelo | `2` |
-| `GRYPE_WORKERS` | Workers de Grype en paralelo | `2` |
-| `CODEQL_WORKERS` | Workers de CodeQL en paralelo (CPU-intensivo) | `1` |
+| `CLONE_WORKERS` | Sin efecto en modo secuencial por repo | `5` |
+| `GITLEAKS_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `SBOM_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `GRYPE_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `CODEQL_WORKERS` | Sin efecto en modo secuencial por repo | `1` |
 | `CLONE_DEPTH` | Profundidad del clone (`none` = historial completo) | `none` |
 | `REPO_LIMIT` | Máximo de repos a procesar | `50` |
 | `REPO_RECENT_DAYS` | Solo repos con actividad en los últimos N días | `30` |
@@ -164,8 +164,8 @@ python -m miner --dry-run
 # Ejecutar el pipeline completo (lee config de .env)
 python -m miner
 
-# Override de org y workers desde CLI
-python -m miner --org nombre-org --workers 10
+# Override de org desde CLI
+python -m miner --org nombre-org
 
 # Limitar cantidad de repos
 python -m miner --limit 10
@@ -197,14 +197,14 @@ Proyecto-CiberSeg/
 ├── miner/
 │   ├── miner/
 │   │   ├── __main__.py      # CLI entrypoint y orquestación
-│   │   ├── miner.py         # GitHubClient + GitHubMiner (extracción de repos)
-│   │   ├── pipeline.py      # Pipeline multi-etapa: clone→gitleaks→sbom→grype→codeql
-│   │   ├── db.py            # Persistencia JSON (dataset estructurado)
+│   │   ├── config.py        # Configuracion del miner
+│   │   ├── miner.py         # Re-exports para compatibilidad
+│   │   ├── miner_service.py # Seleccion de repos y persistencia
+│   │   ├── pipeline.py      # Orquestador por repo (analisis en paralelo)
+│   │   ├── git/             # Cliente GitHub + operaciones git
+│   │   ├── stages/          # Etapas: clone, gitleaks, sbom, grype, codeql
+│   │   ├── store/           # Persistencia JSON modularizada
 │   │   └── models.py        # Dataclasses: Organization, Repository
-│   ├── tests/
-│   │   ├── test_miner.py
-│   │   ├── test_db.py
-│   │   └── test_pipeline.py
 │   └── pyproject.toml
 ├── analyzers/
 │   ├── 00_overview.ipynb    # Resumen general + puntuación de riesgo
@@ -248,9 +248,9 @@ El miner produce `/data/secpipeline.json` con las siguientes colecciones:
 
 Se eligió un único archivo JSON (`secpipeline.json`) como mecanismo de intercambio entre el Miner, el Analyzer y el Visualizer, en lugar de una base de datos relacional o una API. Esto elimina dependencias de infraestructura (no se necesita un servidor de base de datos) y hace que el dataset sea directamente inspeccionable, versionable y portable. El archivo se comparte entre servicios mediante un Docker volume nombrado (`dataset_data`), lo que mantiene el desacoplamiento sin acoplamiento de red.
 
-### 2. Pipeline async por etapas con workers paralelos
+### 2. Pipeline secuencial por repo con analisis en paralelo
 
-El Miner implementa un pipeline de cinco etapas secuenciales (clone → Gitleaks → SBOM → Grype → CodeQL) donde cada etapa procesa múltiples repositorios en paralelo mediante `asyncio.Queue` y workers configurables. La secuencialidad entre etapas garantiza que Grype solo corra sobre un SBOM ya generado, y que CodeQL solo corra sobre un repo ya clonado. Esta arquitectura permite escalar cada etapa de forma independiente.
+El Miner procesa un repositorio a la vez: clona, ejecuta los analisis en paralelo (Gitleaks, SBOM, CodeQL) y luego corre Grype sobre el SBOM. Este orden asegura dependencias correctas (Grype siempre tiene SBOM) y reduce la complejidad de sincronizacion entre repos.
 
 ### 3. Selección de repos por actividad reciente y popularidad
 

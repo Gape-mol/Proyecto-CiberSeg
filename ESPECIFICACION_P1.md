@@ -44,17 +44,17 @@ El formato es libre pero debe ser **consistente y reutilizable**.
 
 | Requisito | Estado | Implementación |
 |-----------|--------|----------------|
-| Clonar repos | ✅ | `pipeline.py:stage_clone()` — clone async con git |
-| Análisis CodeQL | ✅ | `pipeline.py:stage_codeql()` — crea DB + ejecuta queries `*-security-and-quality`, parsea SARIF |
-| SBOM con Syft | ✅ | `pipeline.py:stage_sbom()` — genera CycloneDX JSON |
-| Grype sobre SBOM | ✅ | `pipeline.py:stage_grype()` — consume el SBOM, guarda CVEs con severidad |
+| Clonar repos | ✅ | `pipeline.py:_process_repo()` + `stage_clone()` |
+| Análisis CodeQL | ✅ | `pipeline.py:_run_codeql()` + `stage_codeql()` |
+| SBOM con Syft | ✅ | `pipeline.py:_run_sbom()` + `stage_sbom()` |
+| Grype sobre SBOM | ✅ | `pipeline.py:_run_grype()` + `stage_grype()` |
 | Procesamiento continuo | ✅ | Flag `--continuous` con `--interval` configurable |
 | Máximo 50 repos | ✅ | `REPO_LIMIT=50` por defecto en `MinerConfig` |
 | Tipo en dataset | ✅ | `rule_id`/`rule_name` (CodeQL), `vulnerability_id` (Grype), `rule_id` (Gitleaks) |
 | Ubicación en dataset | ✅ | `location`, `file_path`, `start_line` en todos los findings |
 | Severidad en dataset | ✅ | Campo `severity` en todos los findings |
 | Repo de origen | ✅ | Campo `repo_id` en todas las colecciones de hallazgos |
-| **Extra: Gitleaks** | ➕ | `pipeline.py:stage_gitleaks()` — detección de secretos en historial de commits |
+| **Extra: Gitleaks** | ➕ | `pipeline.py:_run_gitleaks()` + `stage_gitleaks()` |
 
 ---
 
@@ -145,6 +145,6 @@ El proyecto cumple con **todos** los requisitos formales de la especificación P
 
 Los elementos que superan la especificación son:
 - **Gitleaks** como cuarta herramienta (secretos en historial de commits).
-- **Pipeline async con workers configurables** por etapa — mayor robustez y escalabilidad que el mínimo requerido.
+- **Analisis en paralelo por repositorio** — mantiene dependencias y simplifica la orquestacion.
 - **Modo continuo** con intervalo configurable.
 - **Selección inteligente de repos** por actividad reciente y popularidad (no solo tomar los primeros 50).

@@ -11,39 +11,39 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .db import Database
 from .miner import GitHubMiner, MinerConfig
 from .pipeline import Pipeline, PipelineConfig
+from .store import JsonStore
 
 # ── ANSI helpers ───────────────────────────────────────────────────────────────
-_R  = "\033[0m"   # reset
-_B  = "\033[1m"   # bold
-_D  = "\033[2m"   # dim
+_R = "\033[0m"  # reset
+_B = "\033[1m"  # bold
+_D = "\033[2m"  # dim
 
 # Stage badge colors
 _STAGE_COLOR: dict[str, str] = {
-    "clone":    "\033[94m",   # azul claro
-    "gitleaks": "\033[91m",   # rojo claro
-    "sbom":     "\033[95m",   # magenta claro
-    "grype":    "\033[93m",   # amarillo claro
-    "codeql":   "\033[92m",   # verde claro
+    "clone": "\033[94m",  # azul claro
+    "gitleaks": "\033[91m",  # rojo claro
+    "sbom": "\033[95m",  # magenta claro
+    "grype": "\033[93m",  # amarillo claro
+    "codeql": "\033[92m",  # verde claro
 }
 
 # Logger-name colors (cuando no hay stage detectado)
 _LOGGER_COLOR: dict[str, str] = {
-    "miner.cli":      "\033[97m",   # blanco brillante
-    "miner.miner":    "\033[96m",   # cian claro
-    "miner.db":       "\033[90m",   # gris oscuro
-    "miner.pipeline": "\033[97m",   # blanco brillante
+    "miner.cli": "\033[97m",  # blanco brillante
+    "miner.miner": "\033[96m",  # cian claro
+    "miner.store": "\033[90m",  # gris oscuro
+    "miner.pipeline": "\033[97m",  # blanco brillante
 }
 
 # Level colors + símbolo
 _LEVEL_FMT: dict[str, tuple[str, str]] = {
-    "DEBUG":    ("\033[90m",  "·"),    # gris
-    "INFO":     ("\033[37m",  "→"),    # blanco
-    "WARNING":  ("\033[33m",  "⚠ "),   # amarillo
-    "ERROR":    ("\033[31m",  "✗ "),   # rojo
-    "CRITICAL": ("\033[41m",  "!! "),  # fondo rojo
+    "DEBUG": ("\033[90m", "·"),  # gris
+    "INFO": ("\033[37m", "→"),  # blanco
+    "WARNING": ("\033[33m", "⚠ "),  # amarillo
+    "ERROR": ("\033[31m", "✗ "),  # rojo
+    "CRITICAL": ("\033[41m", "!! "),  # fondo rojo
 }
 
 _STAGE_RE = re.compile(r"\[(clone|gitleaks|sbom|grype|codeql)\]", re.IGNORECASE)
@@ -56,7 +56,9 @@ class ColorFormatter(logging.Formatter):
         # Detectar stage desde el mensaje
         m = _STAGE_RE.search(msg)
         stage = m.group(1).lower() if m else None
-        line_color = _STAGE_COLOR.get(stage, "") if stage else _LOGGER_COLOR.get(record.name, "\033[37m")
+        line_color = (
+            _STAGE_COLOR.get(stage, "") if stage else _LOGGER_COLOR.get(record.name, "\033[37m")
+        )
 
         # Badge
         if stage:
@@ -149,7 +151,7 @@ async def run_pipeline_once(
     output_json: Path | None,
 ) -> int:
     logger = logging.getLogger("miner.cli")
-    db = Database(config.db_path)
+    db = JsonStore(config.db_path)
     try:
         await db.connect()
 
@@ -171,7 +173,7 @@ async def run_pipeline_once(
             gitleaks_workers=int(os.environ.get("GITLEAKS_WORKERS", "2")),
             sbom_workers=int(os.environ.get("SBOM_WORKERS", "2")),
             grype_workers=int(os.environ.get("GRYPE_WORKERS", "2")),
-            codeql_workers=int(os.environ.get("CODEQL_WORKERS", "1")),
+            codeql_workers=int(os.environ.get("CODEQL_WORKERS", "2")),
             gitleaks_timeout=int(os.environ.get("GITLEAKS_TIMEOUT", "300")),
             sbom_timeout=int(os.environ.get("SBOM_TIMEOUT", "180")),
             grype_timeout=int(os.environ.get("GRYPE_TIMEOUT", "180")),
@@ -245,15 +247,20 @@ async def main() -> int:
 
     if args.reset:
         import shutil
+
         reports_root = Path(os.environ.get("REPORTS_ROOT", "/data/reports"))
         targets = [
             (Path(config.db_path), "dataset"),
-            (config.clone_root,    "repos clonados"),
-            (reports_root,         "reportes"),
+            (config.clone_root, "repos clonados"),
+            (reports_root, "reportes"),
         ]
-        logger.warning("⚠  --reset: se eliminarán los siguientes datos:")
+        logger.warning("━" * 50)
+        logger.warning("⚠  RESET — Se eliminarán los siguientes datos:")
         for path, label in targets:
-            logger.warning(f"   {label}: {path}")
+            exists = path.exists()
+            status = "existe" if exists else "no encontrado"
+            logger.warning(f"   • {label:<20} {path}  [{status}]")
+        logger.warning("━" * 50)
         for path, label in targets:
             if path.is_file():
                 path.unlink()
@@ -261,7 +268,10 @@ async def main() -> int:
             elif path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
                 logger.info(f"   ✓ {label} eliminado")
-        logger.info("✅  Reset completo. Listo para una nueva extracción.")
+            else:
+                logger.info(f"   - {label} no existía, omitido")
+        logger.info("━" * 50)
+        logger.info("✅  Reset completo — listo para una nueva extracción.")
         if not (args.dry_run or args.continuous):
             return 0
 
@@ -289,6 +299,7 @@ async def main() -> int:
     # Preflight: validar token y org antes de empezar
     try:
         from .miner import GitHubClient
+
         await GitHubClient(config.github_token).preflight_check(config.org_name)
     except Exception as e:
         logger.error(str(e))

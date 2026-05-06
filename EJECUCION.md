@@ -188,8 +188,8 @@ python -m miner --limit 5
 # Cambiar la organización sin editar .env
 python -m miner --org otra-org
 
-# Usar más workers paralelos para clonar más rápido
-python -m miner --workers 10
+# Override de org desde CLI
+python -m miner --org otra-org
 
 # Modo continuo: repite el pipeline cada N segundos
 python -m miner --continuous --interval 300
@@ -225,11 +225,11 @@ Configuradas en `.env` (o exportadas en la shell):
 | `REPORTS_ROOT` | Directorio para reportes SARIF/JSON | `/data/reports` |
 | `REPO_LIMIT` | Máximo de repos a procesar | `50` |
 | `REPO_RECENT_DAYS` | Solo repos con actividad en los últimos N días | `30` |
-| `CLONE_WORKERS` | Repos clonados en paralelo | `5` |
-| `GITLEAKS_WORKERS` | Workers de Gitleaks en paralelo | `2` |
-| `SBOM_WORKERS` | Workers de Syft en paralelo | `2` |
-| `GRYPE_WORKERS` | Workers de Grype en paralelo | `2` |
-| `CODEQL_WORKERS` | Workers de CodeQL en paralelo (CPU-intensivo) | `1` |
+| `CLONE_WORKERS` | Sin efecto en modo secuencial por repo | `5` |
+| `GITLEAKS_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `SBOM_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `GRYPE_WORKERS` | Sin efecto en modo secuencial por repo | `2` |
+| `CODEQL_WORKERS` | Sin efecto en modo secuencial por repo | `1` |
 | `CLONE_DEPTH` | Profundidad del clone (`none` = historial completo) | `none` |
 | `SKIP_ARCHIVED` | Ignorar repos archivados | `false` |
 | `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
@@ -285,7 +285,7 @@ pytest tests/ -v --cov=miner --cov-report=term-missing
 ---
 
 ## Dónde están los datos generados
-
+python -m miner --reset
 Después de correr el miner, los datos se encuentran en:
 
 ```

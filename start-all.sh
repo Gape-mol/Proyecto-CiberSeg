@@ -14,8 +14,14 @@ DATA_PATH="/data/secpipeline.json"
 cleanup() {
   echo ""
   echo "Deteniendo servicios..."
-  kill "$VISUALIZER_PID" "$JUPYTER_PID" 2>/dev/null || true
-  wait "$VISUALIZER_PID" "$JUPYTER_PID" 2>/dev/null || true
+  if [ -n "${VISUALIZER_PID:-}" ]; then
+    kill "$VISUALIZER_PID" 2>/dev/null || true
+    wait "$VISUALIZER_PID" 2>/dev/null || true
+  fi
+  if [ -n "${JUPYTER_PID:-}" ]; then
+    kill "$JUPYTER_PID" 2>/dev/null || true
+    wait "$JUPYTER_PID" 2>/dev/null || true
+  fi
   echo "Listo."
 }
 trap cleanup EXIT INT TERM
@@ -29,7 +35,8 @@ VISUALIZER_PID=$!
 echo "[visualizer] PID=$VISUALIZER_PID → http://localhost:4173"
 
 # Jupyter Lab
-jupyter lab \
+if command -v jupyter >/dev/null 2>&1; then
+  jupyter lab \
   --ip=0.0.0.0 \
   --no-browser \
   --allow-root \
@@ -38,8 +45,12 @@ jupyter lab \
   --ServerApp.token='' \
   --ServerApp.password='' \
   2>&1 | grep --line-buffered -E "(http://|ERROR)" &
-JUPYTER_PID=$!
-echo "[jupyter]    PID=$JUPYTER_PID → http://localhost:8888"
+  JUPYTER_PID=$!
+  echo "[jupyter]    PID=$JUPYTER_PID → http://localhost:8888"
+else
+  echo "[jupyter]    No encontrado en PATH; se omite"
+  JUPYTER_PID=""
+fi
 
 echo ""
 echo "Esperando 2 s para que los servicios arranquen..."
@@ -77,7 +88,8 @@ sbom      = db.get('sbom_components', [])
 
 cloned    = [r for r in repos if r.get('miner_status') == 'cloned']
 errors    = [r for r in repos if r.get('miner_status') == 'error']
-org       = db.get('organizations', [{}])[0].get('name', '?')
+orgs = db.get('organizations', [])
+org  = orgs[0].get('name', '?') if orgs else '?'
 
 sev_c = lambda arr, s: sum(1 for f in arr if (f.get('severity') or '').lower() == s)
 
