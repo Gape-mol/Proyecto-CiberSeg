@@ -210,6 +210,29 @@ python -m miner --reset --limit 5 -v
 python -m miner --help
 ```
 
+### Modo AIDev
+
+El modo AIDev permite procesar organizaciones directamente desde el dataset AIDev en HuggingFace:
+
+```bash
+# Modo AIDev: procesar todas las organizaciones del dataset
+AIDEV_MODE=true python -m miner
+
+# Filtrar organizaciones específicas (comma-separated)
+AIDEV_MODE=true AIDEV_ORG_FILTER=bolt-foundry,Metta-AI python -m miner
+
+# Filtrar repos por mínimo de stars (útil para enfocarse en proyectos populares)
+AIDEV_MODE=true AIDEV_REPO_MIN_STARS=100 python -m miner
+
+# Combinación: orgs específicas + mínimo de stars
+AIDEV_MODE=true AIDEV_ORG_FILTER=bolt-foundry AIDEV_REPO_MIN_STARS=50 python -m miner
+
+# Con dry-run para预览 qué se procesará
+AIDEV_MODE=true python -m miner --dry-run
+```
+
+El modo AIDev carga la lista de organizaciones desde el dataset `hao-li/AIDev` en HuggingFace y procesa cada una a través del pipeline completo.
+
 ---
 
 ## Variables de entorno disponibles
@@ -235,6 +258,9 @@ Configuradas en `.env` (o exportadas en la shell):
 | `REPO_VISIBILITY` | `all`, `public`, `private`, `internal` | `all` |
 | `RUN_CONTINUOUS` | Activar modo continuo | `false` |
 | `RUN_INTERVAL_SECONDS` | Segundos entre corridas continuas | `3600` |
+| `AIDEV_MODE` | Si `true`, carga organizaciones del dataset AIDev directamente | `false` |
+| `AIDEV_ORG_FILTER` | Comma-separated orgs a procesar (vacío = todas) | todas |
+| `AIDEV_REPO_MIN_STARS` | Mínimo de stars para repos en modo AIDev | `0` |
 
 ---
 

@@ -16,6 +16,7 @@ from miner.miner import (
     GitHubClient,
     MinerConfig,
     _auth_clone_url,
+    _normalize_aidev_row,
     clone_or_update_repo,
 )
 from miner.models import Organization, Repository
@@ -28,7 +29,6 @@ from miner.models import Organization, Repository
 def config(tmp_path: Path) -> MinerConfig:
     return MinerConfig(
         github_token="ghp_test_token",
-        org_name="test-org",
         clone_root=tmp_path / "repos",
         db_path=str(tmp_path / "test.json"),
         clone_workers=2,
@@ -65,64 +65,55 @@ def sample_repo_data() -> dict[str, object]:
 class TestGitHubClient:
 
     @respx.mock
-    async def test_list_org_repos_single_page(self, sample_repo_data):
-        """Verifica que se listen repos correctamente en una página."""
-        respx.get("https://api.github.com/orgs/test-org/repos").mock(
-            return_value=httpx.Response(
-                200,
-                json=[sample_repo_data],
-                headers={"Link": ""},  # Sin página siguiente
-            )
+    async def test_preflight_check_valid_token(self):
+        """Verifica que preflight_check pasa con token válido."""
+        respx.get("https://api.github.com/rate_limit").mock(
+            return_value=httpx.Response(200, json={"resources": {"core": {"remaining": 5000, "limit": 5000}}})
         )
-
         client = GitHubClient("test_token")
-        repos = []
-        async for repo in client.list_org_repos("test-org"):
-            repos.append(repo)
-
-        assert len(repos) == 1
-        assert repos[0]["full_name"] == "test-org/mi-servicio"
+        await client.preflight_check()  # no debe lanzar excepción
 
     @respx.mock
-    async def test_list_org_repos_pagination(self, sample_repo_data):
-        """Verifica que se sigan los headers Link para paginación."""
-        page2_data = {**sample_repo_data, "name": "otro-repo", "full_name": "test-org/otro-repo"}
-
-        # Un solo route con side_effect list: primera llamada → página 1,
-        # segunda llamada → página 2. Sin esto, el route sin params matchea
-        # también la URL con ?page=2, causando un loop infinito.
-        respx.get("https://api.github.com/orgs/test-org/repos").mock(
-            side_effect=[
-                httpx.Response(
-                    200,
-                    json=[sample_repo_data],
-                    headers={
-                        "Link": '<https://api.github.com/orgs/test-org/repos?page=2>; rel="next"'
-                    },
-                ),
-                httpx.Response(200, json=[page2_data], headers={"Link": ""}),
-            ]
+    async def test_preflight_check_invalid_token(self):
+        """Verifica que preflight_check falla con token inválido."""
+        respx.get("https://api.github.com/rate_limit").mock(
+            return_value=httpx.Response(401, json={"message": "Bad credentials"})
         )
+        client = GitHubClient("bad_token")
+        with pytest.raises(RuntimeError, match="inválido"):
+            await client.preflight_check()
 
-        client = GitHubClient("test_token")
-        repos = [r async for r in client.list_org_repos("test-org")]
-        assert len(repos) == 2
 
-    def test_next_link_parses_correctly(self):
-        client = GitHubClient("token")
-        header = (
-            '<https://api.github.com/orgs/x/repos?page=2>; rel="next", '
-            '<https://api.github.com/orgs/x/repos?page=5>; rel="last"'
-        )
-        assert client._next_link(header) == "https://api.github.com/orgs/x/repos?page=2"
+class TestNormalizeAIDevRow:
 
-    def test_next_link_returns_none_on_last_page(self):
-        client = GitHubClient("token")
-        header = '<https://api.github.com/orgs/x/repos?page=1>; rel="first"'
-        assert client._next_link(header) is None
+    def test_fills_missing_full_name(self):
+        row = {"owner": {"login": "org1"}, "name": "repo1", "stargazers_count": 10}
+        result = _normalize_aidev_row(row)
+        assert result is not None
+        assert result["full_name"] == "org1/repo1"
 
-    def test_next_link_returns_none_on_empty(self):
-        assert GitHubClient._next_link("") is None
+    def test_fills_missing_clone_url(self):
+        row = {"owner": {"login": "org1"}, "name": "repo1", "stargazers_count": 10}
+        result = _normalize_aidev_row(row)
+        assert result is not None
+        assert result["clone_url"] == "https://github.com/org1/repo1.git"
+
+    def test_preserves_existing_fields(self):
+        row = {
+            "owner": {"login": "org1"}, "name": "repo1",
+            "full_name": "org1/repo1",
+            "clone_url": "https://github.com/org1/repo1.git",
+            "stargazers_count": 42,
+        }
+        result = _normalize_aidev_row(row)
+        assert result is not None
+        assert result["stargazers_count"] == 42
+
+    def test_returns_none_for_missing_owner(self):
+        assert _normalize_aidev_row({"name": "repo1"}) is None
+
+    def test_returns_none_for_missing_name(self):
+        assert _normalize_aidev_row({"owner": {"login": "org1"}}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +189,7 @@ class TestMinerConfig:
 
     def test_from_env(self, monkeypatch, tmp_path):
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
-        monkeypatch.setenv("GITHUB_ORG", "mi-org")
+        monkeypatch.setenv("AIDEV_ORG_FILTER", "org-a,org-b")
         monkeypatch.setenv("CLONE_ROOT", str(tmp_path))
         monkeypatch.setenv("CLONE_WORKERS", "8")
         monkeypatch.setenv("CLONE_DEPTH", "none")
@@ -207,15 +198,23 @@ class TestMinerConfig:
 
         config = MinerConfig.from_env()
         assert config.github_token == "ghp_abc"
-        assert config.org_name == "mi-org"
+        assert config.org_filter == ["org-a", "org-b"]
         assert config.clone_workers == 8
         assert config.clone_depth is None  # "none" → None
         assert config.continuous is True
         assert config.run_interval_s == 120
 
+    def test_from_env_no_filter_processes_all_orgs(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
+        monkeypatch.delenv("AIDEV_ORG_FILTER", raising=False)
+        monkeypatch.delenv("GITHUB_ORG", raising=False)
+        monkeypatch.setenv("CLONE_ROOT", str(tmp_path))
+
+        config = MinerConfig.from_env()
+        assert config.org_filter is None
+
     def test_from_env_missing_token(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("GH_TOKEN", raising=False)
-        monkeypatch.setenv("GITHUB_ORG", "org")
         with pytest.raises(OSError, match="GITHUB_TOKEN"):
             MinerConfig.from_env()

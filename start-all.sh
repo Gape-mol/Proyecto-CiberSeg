@@ -37,7 +37,7 @@ jupyter lab \
   --notebook-dir="$SCRIPT_DIR/analyzers" \
   --ServerApp.token='' \
   --ServerApp.password='' \
-  2>&1 | grep --line-buffered -E "(http://|ERROR)" &
+  > >(grep --line-buffered -E "(http://|ERROR)") 2>&1 &
 JUPYTER_PID=$!
 echo "[jupyter]    PID=$JUPYTER_PID → http://localhost:8888"
 

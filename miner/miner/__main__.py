@@ -109,7 +109,7 @@ Ejemplos:
   python -m miner --dry-run
         """,
     )
-    parser.add_argument("--org", help="Nombre de la organización GitHub (override de GITHUB_ORG)")
+    parser.add_argument("--org", help="Filtrar por esta organización del dataset AIDev (override de AIDEV_ORG_FILTER)")
     parser.add_argument("--workers", type=int, help="Repos a clonar en paralelo (default: 5)")
     parser.add_argument(
         "--depth", type=int, help="Profundidad del clone. 0=completo (default para gitleaks)"
@@ -154,24 +154,15 @@ async def run_pipeline_once(
         await db.connect()
 
         miner = GitHubMiner(config=config, db=db)
-        miner_summary, repos = await miner.run()
-
-        if not repos:
-            logger.warning("No se encontraron repos para analizar. Abortando.")
-            return 0
 
         reports_root = Path(os.environ.get("REPORTS_ROOT", "/data/reports"))
         pipeline_config = PipelineConfig(
             clone_root=config.clone_root,
             output_root=reports_root,
             github_token=config.github_token,
-            clone_workers=config.clone_workers,
+            max_concurrent_repos=int(os.environ.get("MAX_CONCURRENT_REPOS", "3")),
             clone_timeout=config.clone_timeout,
             clone_depth=config.clone_depth,
-            gitleaks_workers=int(os.environ.get("GITLEAKS_WORKERS", "2")),
-            sbom_workers=int(os.environ.get("SBOM_WORKERS", "2")),
-            grype_workers=int(os.environ.get("GRYPE_WORKERS", "2")),
-            codeql_workers=int(os.environ.get("CODEQL_WORKERS", "1")),
             gitleaks_timeout=int(os.environ.get("GITLEAKS_TIMEOUT", "300")),
             sbom_timeout=int(os.environ.get("SBOM_TIMEOUT", "180")),
             grype_timeout=int(os.environ.get("GRYPE_TIMEOUT", "180")),
@@ -179,7 +170,13 @@ async def run_pipeline_once(
         )
 
         pipeline = Pipeline(config=pipeline_config, db=db)
-        pipeline_summary = await pipeline.run(repos)
+
+        miner_summary, repos = await miner.run()
+
+        if not repos:
+            logger.warning("No se encontraron repos para analizar.")
+
+        pipeline_summary = await pipeline.run_sequential(repos)
 
         summary = {**miner_summary, **pipeline_summary}
 
@@ -220,7 +217,7 @@ async def main() -> int:
         return 1
 
     if args.org:
-        config.org_name = args.org
+        config.org_filter = [args.org]
     if args.workers:
         config.clone_workers = args.workers
     if args.depth is not None:
@@ -236,8 +233,9 @@ async def main() -> int:
     if args.interval:
         config.run_interval_s = args.interval
 
+    org_filter_str = ",".join(config.org_filter) if config.org_filter else "todas"
     logger.info(
-        f"Config: org={config.org_name}, workers={config.clone_workers}, "
+        f"Config: org_filter={org_filter_str}, workers={config.clone_workers}, "
         f"clone_root={config.clone_root}, depth={config.clone_depth or 'full'}, "
         f"repo_limit={config.repo_limit}, continuous={config.continuous}, "
         f"interval_s={config.run_interval_s}"
@@ -269,27 +267,38 @@ async def main() -> int:
         if config.continuous:
             logger.error("--dry-run no es compatible con --continuous")
             return 1
+        from .aidev import create_aidev_client
         from .miner import GitHubClient
 
-        client = GitHubClient(config.github_token)
         try:
-            await client.preflight_check(config.org_name)
+            await GitHubClient(config.github_token).preflight_check()
         except Exception as e:
             logger.error(str(e))
             return 1
+
+        aidev = create_aidev_client()
+        orgs = aidev.list_organizations(min_stars=config.repo_min_stars)
+        if config.org_filter:
+            org_filter_set = set(config.org_filter)
+            orgs = [o for o in orgs if o.login in org_filter_set]
+
         count = 0
-        logger.info(f"[DRY RUN] Listando repos de '{config.org_name}'…")
-        async for repo in client.list_org_repos(config.org_name, config.visibility):
-            archived = " [ARCHIVED]" if repo.get("archived") else ""
-            print(f"  {repo['full_name']} ({repo.get('language', '?')}){archived}")
-            count += 1
-        print(f"\nTotal: {count} repositorios")
+        for org in orgs:
+            logger.info(f"[DRY RUN] {org.login} ({org.repo_count} repos en AIDev)")
+            for row in aidev.iter_repos(org_filter=org.login, min_stars=config.repo_min_stars):
+                archived = " [ARCHIVED]" if row.get("archived") else ""
+                lang = row.get("language") or "?"
+                stars = row.get("stargazers_count", 0)
+                name = row.get("full_name") or f"{org.login}/{row.get('name', '?')}"
+                print(f"  {name} ({lang}, ★{stars}){archived}")
+                count += 1
+        print(f"\nTotal: {count} repositorios en {len(orgs)} organizaciones")
         return 0
 
-    # Preflight: validar token y org antes de empezar
+    # Preflight: validar token antes de empezar
     try:
         from .miner import GitHubClient
-        await GitHubClient(config.github_token).preflight_check(config.org_name)
+        await GitHubClient(config.github_token).preflight_check()
     except Exception as e:
         logger.error(str(e))
         return 1

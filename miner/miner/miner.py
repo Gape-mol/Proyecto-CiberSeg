@@ -5,11 +5,10 @@ import logging
 import os
 import re
 import shutil
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from tenacity import (
@@ -20,6 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from .aidev import AIDevClient, create_aidev_client
 from .db import Database
 from .models import Organization, Repository
 
@@ -30,7 +30,6 @@ class MinerConfig:
     """Toda la config que necesita el miner, cargada desde env/archivo."""
 
     github_token: str
-    org_name: str
     clone_root: Path
     db_path: str
 
@@ -44,20 +43,22 @@ class MinerConfig:
     continuous: bool = False
     run_interval_s: int = 3600
 
+    org_filter: list[str] | None = None
+    repo_min_stars: int = 0
+
     @classmethod
     def from_env(cls) -> MinerConfig:
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         if not token:
-            raise OSError(
-                "Se requiere GITHUB_TOKEN o GH_TOKEN en el entorno."
-            )
-        org = os.environ.get("GITHUB_ORG")
-        if not org:
-            raise OSError("Se requiere GITHUB_ORG en el entorno.")
+            raise OSError("Se requiere GITHUB_TOKEN o GH_TOKEN en el entorno.")
+
+        org_filter: list[str] | None = None
+        org_filter_str = os.environ.get("AIDEV_ORG_FILTER", "") or os.environ.get("GITHUB_ORG", "")
+        if org_filter_str:
+            org_filter = [o.strip() for o in org_filter_str.split(",") if o.strip()]
 
         return cls(
             github_token=token,
-            org_name=org,
             clone_root=Path(os.environ.get("CLONE_ROOT", "/data/repos")),
             db_path=os.environ.get("DB_PATH", "/data/secpipeline.json"),
             clone_workers=int(os.environ.get("CLONE_WORKERS", "5")),
@@ -69,6 +70,8 @@ class MinerConfig:
             repo_recent_days=int(os.environ.get("REPO_RECENT_DAYS", "30")),
             continuous=os.environ.get("RUN_CONTINUOUS", "false").lower() == "true",
             run_interval_s=int(os.environ.get("RUN_INTERVAL_SECONDS", "3600")),
+            org_filter=org_filter,
+            repo_min_stars=int(os.environ.get("AIDEV_REPO_MIN_STARS", "0")),
         )
 
 
@@ -76,6 +79,32 @@ def _parse_depth(value: str | None) -> int | None:
     if value is None or value.lower() in ("none", "full", ""):
         return None
     return int(value)
+
+
+def _normalize_aidev_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Convierte una fila del dataset AIDev al formato de la GitHub API.
+
+    El dataset AIDev es un snapshot de la API de GitHub, por lo que la mayoría
+    de campos son idénticos. Este helper rellena campos que pueden faltar.
+    """
+    owner = row.get("owner")
+    if not owner or not isinstance(owner, dict):
+        return None
+
+    owner_login = owner.get("login")
+    name = row.get("name")
+    if not owner_login or not name:
+        return None
+
+    full_name = row.get("full_name") or f"{owner_login}/{name}"
+    clone_url = row.get("clone_url") or f"https://github.com/{full_name}.git"
+
+    return {
+        **row,
+        "full_name": full_name,
+        "clone_url": clone_url,
+        "forks_count": row.get("forks_count") or row.get("forks", 0),
+    }
 
 class GitHubClient:
 
@@ -89,54 +118,9 @@ class GitHubClient:
         }
         self._limiter = asyncio.Semaphore(10)
 
-    async def list_org_repos(
-        self,
-        org: str,
-        visibility: str = "all",
-        per_page: int = 100,
-        max_results: int | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        url: str | None = f"{self.BASE_URL}/orgs/{org}/repos"
-        # Ordenar por push (actividad reciente) permite cortar antes cuando hay límite
-        params: dict[str, Any] = {"per_page": per_page, "type": visibility, "sort": "pushed", "direction": "desc"}
-
-        page = 0
-        yielded = 0
-        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
-            while url:
-                page += 1
-                logger.debug(f"  API página {page}: {url}")
-                response = await self._get_with_retry(client, url, params=params)
-                repos = response.json()
-
-                if not isinstance(repos, list):
-                    error = repos.get("message", "Unknown error")
-                    raise RuntimeError(f"Error de GitHub API: {error}")
-
-                for repo in repos:
-                    if not isinstance(repo, dict):
-                        raise RuntimeError("GitHub API devolvió un repo con formato inválido")
-                    yield repo
-                    yielded += 1
-                    # Cortar temprano si ya tenemos suficientes repos recientes
-                    if max_results and yielded >= max_results:
-                        return
-
-                url = self._next_link(response.headers.get("Link", ""))
-                params = {}
-
-    async def get_org(self, org: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
-            r = await self._get_with_retry(client, f"{self.BASE_URL}/orgs/{org}")
-            payload = r.json()
-            if not isinstance(payload, dict):
-                raise RuntimeError("GitHub API devolvió una organización con formato inválido")
-            return cast(dict[str, Any], payload)
-
-    async def preflight_check(self, org: str) -> None:
-        """Valida token y organización antes de empezar. Falla rápido con mensaje claro."""
+    async def preflight_check(self) -> None:
+        """Valida el token de GitHub antes de empezar. Falla rápido con mensaje claro."""
         async with httpx.AsyncClient(headers=self._headers, timeout=15) as client:
-            # 1. Verificar token
             r = await client.get(f"{self.BASE_URL}/rate_limit")
             if r.status_code == 401:
                 raise RuntimeError(
@@ -148,25 +132,6 @@ class GitHubClient:
             logger.info(
                 f"✅  Token válido — rate limit: {rate['remaining']}/{rate['limit']} "
                 f"requests disponibles"
-            )
-
-            # 2. Verificar organización
-            r2 = await client.get(f"{self.BASE_URL}/orgs/{org}")
-            if r2.status_code == 404:
-                raise RuntimeError(
-                    f"❌  Organización '{org}' no encontrada en GitHub.\n"
-                    f"    Verificá GITHUB_ORG en /workspace/.env."
-                )
-            if r2.status_code == 403:
-                raise RuntimeError(
-                    f"❌  Sin permiso para acceder a '{org}' (403).\n"
-                    f"    El token necesita scope 'read:org'."
-                )
-            r2.raise_for_status()
-            org_data = r2.json()
-            logger.info(
-                f"✅  Organización encontrada: {org_data.get('login')} "
-                f"— {org_data.get('public_repos', '?')} repos públicos"
             )
 
     @retry(
@@ -194,17 +159,6 @@ class GitHubClient:
 
             response.raise_for_status()
             return response
-
-    @staticmethod
-    def _next_link(link_header: str) -> str | None:
-        """Parsea el header Link de GitHub para obtener la URL de la siguiente página."""
-        if not link_header:
-            return None
-        for part in link_header.split(","):
-            url_part, *rel_parts = part.strip().split(";")
-            if any('rel="next"' in r for r in rel_parts):
-                return url_part.strip().strip("<>")
-        return None
 
 @dataclass
 class CloneResult:
@@ -343,59 +297,120 @@ class GitHubMiner:
         self.config = config
         self.db = db
         self.client = GitHubClient(config.github_token)
+        self.aidev_client: AIDevClient | None = None
 
     async def run(self) -> tuple[dict[str, Any], list[Repository]]:
-        """Registra la org, selecciona repos y los retorna para el pipeline."""
-        logger.info(f"Iniciando mining de organización: {self.config.org_name}")
+        """Carga organizaciones del dataset AIDev y selecciona repos para el pipeline."""
+        logger.info("Cargando repositorios desde el dataset AIDev (HuggingFace)")
+        self.aidev_client = create_aidev_client()
 
-        org_data = await self.client.get_org(self.config.org_name)
-        org = await self.db.upsert_organization(Organization.from_api(org_data))
-        logger.info(f"Organización '{org.name}' registrada (id={org.id})")
+        all_orgs = self.aidev_client.list_organizations(min_stars=self.config.repo_min_stars)
+        logger.info(f"Organizaciones en AIDev: {len(all_orgs)}")
 
-        repos = await self._collect_repos(org)
-        logger.info(
-            f"Repos seleccionados: {len(repos)} "
-            f"(límite={self.config.repo_limit}, "
-            f"actividad últimos {self.config.repo_recent_days} días)"
-        )
+        if self.config.org_filter:
+            org_filter_set = set(self.config.org_filter)
+            all_orgs = [o for o in all_orgs if o.login in org_filter_set]
+            logger.info(f"Organizaciones tras filtro: {len(all_orgs)}")
 
-        summary: dict[str, Any] = {
-            "org": org.name,
-            "repos_selected": len(repos),
+        if not all_orgs:
+            raise RuntimeError("No se encontraron organizaciones en AIDev con los filtros especificados")
+
+        all_repos: list[Repository] = []
+        for aidev_org in all_orgs:
+            logger.info(f"Procesando owner: {aidev_org.login} ({aidev_org.repo_count} repos en AIDev)")
+            try:
+                org = await self.db.upsert_organization(Organization(
+                    name=aidev_org.login,
+                    url=f"https://github.com/{aidev_org.login}",
+                ))
+                repos = await self._collect_repos_from_aidev(org, aidev_org.login)
+                all_repos.extend(repos)
+                logger.info(f"  → {len(repos)} repos seleccionados de {aidev_org.login}")
+            except Exception as e:
+                logger.error(f"Error procesando owner {aidev_org.login}: {e}")
+                continue
+
+        logger.info(f"Total repos seleccionados: {len(all_repos)}")
+        return {
+            "org": f"AIDev-{len(all_orgs)}-orgs",
+            "repos_selected": len(all_repos),
             "repo_limit": self.config.repo_limit,
+            "aidev_orgs_processed": len(all_orgs),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }, all_repos
+
+    async def stream_repos(
+        self, out_q: asyncio.Queue[Repository | None]
+    ) -> dict[str, Any]:
+        """Descubre repos del dataset AIDev y los pone en out_q a medida que los encuentra.
+        Siempre envía None al final como sentinel, incluso si falla."""
+        logger.info("Cargando repositorios desde el dataset AIDev (HuggingFace)")
+        self.aidev_client = create_aidev_client()
+
+        all_orgs = self.aidev_client.list_organizations(min_stars=self.config.repo_min_stars)
+        logger.info(f"Organizaciones en AIDev: {len(all_orgs)}")
+
+        if self.config.org_filter:
+            org_filter_set = set(self.config.org_filter)
+            all_orgs = [o for o in all_orgs if o.login in org_filter_set]
+            logger.info(f"Organizaciones tras filtro: {len(all_orgs)}")
+
+        total_repos = 0
+        orgs_processed = 0
+        try:
+            if not all_orgs:
+                raise RuntimeError(
+                    "No se encontraron organizaciones en AIDev con los filtros especificados"
+                )
+
+            for aidev_org in all_orgs:
+                logger.info(
+                    f"Procesando owner: {aidev_org.login} ({aidev_org.repo_count} repos en AIDev)"
+                )
+                try:
+                    org = await self.db.upsert_organization(Organization(
+                        name=aidev_org.login,
+                        url=f"https://github.com/{aidev_org.login}",
+                    ))
+                    repos = await self._collect_repos_from_aidev(org, aidev_org.login)
+                    for repo in repos:
+                        await out_q.put(repo)
+                    total_repos += len(repos)
+                    orgs_processed += 1
+                    logger.info(f"  → {len(repos)} repos enviados al pipeline de {aidev_org.login}")
+                except Exception as e:
+                    logger.error(f"Error procesando owner {aidev_org.login}: {e}")
+                    continue
+        finally:
+            await out_q.put(None)
+
+        logger.info(f"Total repos enviados al pipeline: {total_repos}")
+        return {
+            "org": f"AIDev-{orgs_processed}-orgs",
+            "repos_selected": total_repos,
+            "repo_limit": self.config.repo_limit,
+            "aidev_orgs_processed": orgs_processed,
             "timestamp": datetime.now(UTC).isoformat(),
         }
-        return summary, repos
 
-    async def _collect_repos(self, org: Organization) -> list[Repository]:
-        """Lista todos los repos, filtra por actividad reciente, ordena por estrellas y limita."""
+    async def _collect_repos_from_aidev(
+        self, org: Organization, org_login: str
+    ) -> list[Repository]:
+        """Obtiene repos del dataset AIDev (en lugar de la GitHub API)."""
+        assert self.aidev_client is not None
+        assert org.id is not None
+
         all_repos: list[Repository] = []
-
-        # Pedimos un múltiplo del límite para tener margen de filtrado por actividad,
-        # pero sin descargar el catálogo completo cuando la org es enorme.
-        fetch_limit = self.config.repo_limit * 4
-        logger.info(
-            f"Listando repositorios de '{org.name}'… "
-            f"(trayendo hasta {fetch_limit} más recientes, límite final: {self.config.repo_limit})"
-        )
-        async for repo_data in self.client.list_org_repos(
-            org.name, visibility=self.config.visibility, max_results=fetch_limit
+        for row in self.aidev_client.iter_repos(
+            org_filter=org_login,
+            min_stars=self.config.repo_min_stars,
         ):
-            if self.config.skip_archived and repo_data.get("archived"):
-                logger.debug(f"Saltando repo archivado: {repo_data['full_name']}")
+            if self.config.skip_archived and row.get("archived"):
                 continue
-            assert org.id is not None
-            all_repos.append(Repository.from_api(repo_data, org_id=org.id))
-            n = len(all_repos)
-            if n % 25 == 0:
-                logger.info(f"  … {n} repos listados hasta ahora")
-
-        # Dedup por full_name: la paginación por offset de GitHub puede devolver
-        # el mismo repo en dos páginas si fue actualizado entre ambas peticiones.
-        seen: dict[str, Repository] = {}
-        for r in all_repos:
-            seen.setdefault(r.full_name, r)  # conserva la primera aparición (más reciente)
-        all_repos = list(seen.values())
+            normalized = _normalize_aidev_row(row)
+            if normalized is None:
+                continue
+            all_repos.append(Repository.from_api(normalized, org_id=org.id))
 
         cutoff = datetime.now(UTC) - timedelta(days=self.config.repo_recent_days)
         recent = [r for r in all_repos if r.last_commit_at and r.last_commit_at >= cutoff]
@@ -403,7 +418,6 @@ class GitHubMiner:
         if len(recent) >= self.config.repo_limit:
             selected = sorted(recent, key=lambda r: r.stars, reverse=True)[: self.config.repo_limit]
         else:
-            # Si no hay suficientes repos recientes, completa con los más populares restantes
             recent_names = {r.full_name for r in recent}
             inactive = sorted(
                 [r for r in all_repos if r.full_name not in recent_names],
@@ -416,14 +430,13 @@ class GitHubMiner:
             )
 
         logger.info(
-            f"Total repos en org: {len(all_repos)} | "
-            f"con actividad reciente: {len(recent)} | "
-            f"seleccionados: {len(selected)}"
+            f"AIDev repos para '{org_login}': {len(all_repos)} total | "
+            f"con actividad reciente: {len(recent)} | seleccionados: {len(selected)}"
         )
 
-        # Upsert solo los repos seleccionados
         repos: list[Repository] = []
         for repo in selected:
             repo = await self.db.upsert_repository(repo)
             repos.append(repo)
         return repos
+

@@ -498,11 +498,7 @@ class PipelineConfig:
     output_root: Path
     github_token: str
 
-    clone_workers: int = 3
-    gitleaks_workers: int = 2
-    sbom_workers: int = 2
-    grype_workers: int = 2
-    codeql_workers: int = 2
+    max_concurrent_repos: int = 3
 
     clone_timeout: int = 600
     gitleaks_timeout: int = 300
@@ -521,319 +517,245 @@ class Pipeline:
         self._lock = asyncio.Lock()
 
     async def run(self, repos: list[Repository]) -> dict[str, Any]:
-        """
-        Pipeline streaming: cada repo avanza etapa a etapa en cuanto termina
-        la anterior, sin esperar a que todos los repos completen cada fase.
-
-        Los coordinadores (_after_clone, _after_sbom) inyectan los sentineles
-        downstream solo cuando todos sus workers productores terminaron,
-        garantizando que ningún worker cierre la cola antes de tiempo.
-        Todos los workers corren en un único asyncio.gather desde el inicio.
-        """
+        """Procesa una lista de repos precargada (usado en tests)."""
         if not repos:
-            return {"total": 0, "stages": {}}
-
-        q_clone: asyncio.Queue[Repository | None] = asyncio.Queue()
-        q_gitleaks: asyncio.Queue[StageResult | None] = asyncio.Queue()
-        q_sbom: asyncio.Queue[StageResult | None] = asyncio.Queue()
-        q_grype: asyncio.Queue[StageResult | None] = asyncio.Queue()
-        q_codeql: asyncio.Queue[StageResult | None] = asyncio.Queue()
-
-        logger.info(
-            f"Iniciando pipeline: {len(repos)} repos | "
-            f"workers clone={self.config.clone_workers} "
-            f"gitleaks={self.config.gitleaks_workers} "
-            f"sbom={self.config.sbom_workers} "
-            f"grype={self.config.grype_workers} "
-            f"codeql={self.config.codeql_workers}"
-        )
-
+            return {"total_repos": 0, "stages": {}}
+        q: asyncio.Queue[Repository | None] = asyncio.Queue()
         for repo in repos:
-            await q_clone.put(repo)
-        for _ in range(self.config.clone_workers):
-            await q_clone.put(_DONE)
+            await q.put(repo)
+        await q.put(None)
+        return await self.run_from_queue(q)
 
-        async def _after_clone() -> None:
-            await asyncio.gather(
-                *[
-                    self._worker_clone(q_clone, q_gitleaks, q_sbom)
-                    for _ in range(self.config.clone_workers)
-                ]
-            )
-            for _ in range(self.config.gitleaks_workers):
-                await q_gitleaks.put(_DONE)
-            for _ in range(self.config.sbom_workers):
-                await q_sbom.put(_DONE)
+    async def run_sequential(self, repos: list[Repository]) -> dict[str, Any]:
+        """Procesa repos de a uno: espera que el pipeline completo de cada repo termine
+        antes de pasar al siguiente."""
+        if not repos:
+            return {"total_repos": 0, "stages": {}}
+        semaphore = asyncio.Semaphore(1)
+        logger.info(f"Pipeline secuencial iniciado | {len(repos)} repos")
+        for i, repo in enumerate(repos, 1):
+            logger.info(f"[{i}/{len(repos)}] → {repo.full_name}")
+            await self._process_repo(repo, semaphore)
+        return self._build_summary(repos)
 
-        async def _after_sbom() -> None:
-            await asyncio.gather(
-                *[
-                    self._worker_sbom(q_sbom, q_grype, q_codeql)
-                    for _ in range(self.config.sbom_workers)
-                ]
-            )
-            for _ in range(self.config.grype_workers):
-                await q_grype.put(_DONE)
-            for _ in range(self.config.codeql_workers):
-                await q_codeql.put(_DONE)
+    async def run_from_queue(
+        self, repos_q: asyncio.Queue[Repository | None]
+    ) -> dict[str, Any]:
+        """Consume repos de la cola y los procesa en cuanto llegan.
+        Máximo max_concurrent_repos simultáneos. Termina con sentinel None."""
+        semaphore = asyncio.Semaphore(self.config.max_concurrent_repos)
+        repos: list[Repository] = []
+        tasks: list[asyncio.Task[None]] = []
 
-        await asyncio.gather(
-            _after_clone(),
-            _after_sbom(),
-            *[self._worker_gitleaks(q_gitleaks) for _ in range(self.config.gitleaks_workers)],
-            *[self._worker_grype(q_grype) for _ in range(self.config.grype_workers)],
-            *[self._worker_codeql(q_codeql) for _ in range(self.config.codeql_workers)],
-        )
+        logger.info(f"Pipeline iniciado | max_concurrent={self.config.max_concurrent_repos}")
+
+        while True:
+            repo: Repository | None = await repos_q.get()
+            if repo is None:
+                break
+            repos.append(repo)
+            tasks.append(asyncio.create_task(self._process_repo(repo, semaphore)))
+
+        if tasks:
+            await asyncio.gather(*tasks)
 
         return self._build_summary(repos)
 
-    async def _worker_clone(
-        self,
-        in_q: asyncio.Queue[Repository | None],
-        out_gitleaks: asyncio.Queue[StageResult | None],
-        out_sbom: asyncio.Queue[StageResult | None],
+    async def _process_repo(
+        self, repo: Repository, semaphore: asyncio.Semaphore
     ) -> None:
-        while True:
-            repo: Repository | None = await in_q.get()
-            if repo is _DONE:
-                break
-
-            logger.info(f"[clone] → {repo.full_name}")
+        """Ejecuta todas las etapas del pipeline para un repo, respetando el semáforo."""
+        async with semaphore:
             repo_id = _repo_id(repo)
-            await self.db.update_repo_status(repo_id, "cloning")
 
-            result = await stage_clone(
+            # Etapa: Clone
+            logger.info(f"[clone] → {repo.full_name}")
+            await self.db.update_repo_status(repo_id, "cloning")
+            clone_result = await stage_clone(
                 repo=repo,
                 clone_root=self.config.clone_root,
                 token=self.config.github_token,
                 depth=self.config.clone_depth,
                 timeout=self.config.clone_timeout,
             )
-            await self._record(result)
+            await self._record(clone_result)
 
-            if result.success:
-                await self.db.mark_repo_cloned(
-                    repo_id,
-                    clone_path=result.metadata["clone_path"],
-                    commit_sha=result.metadata["commit_sha"],
-                )
-                logger.info(f"[clone] ✓ {repo.full_name}")
-                await out_gitleaks.put(result)
-                await out_sbom.put(result)
-            else:
-                await self.db.update_repo_status(repo_id, "error", error=result.error)
-                logger.warning(f"[clone] ✗ {repo.full_name}: {result.error}")
+            if not clone_result.success:
+                await self.db.update_repo_status(repo_id, "error", error=clone_result.error)
+                logger.warning(f"[clone] ✗ {repo.full_name}: {clone_result.error}")
+                return
 
-    async def _worker_gitleaks(self, in_q: asyncio.Queue[StageResult | None]) -> None:
-        while True:
-            clone_result: StageResult | None = await in_q.get()
-            if clone_result is _DONE:
-                break
-
-            repo = await self.db.get_repo_by_id(clone_result.repo_id)
-            clone_path = Path(clone_result.metadata["clone_path"])
-            output_dir = self.config.output_root / repo.name / "gitleaks"
-
-            logger.info(f"[gitleaks] → {clone_result.repo_full_name}")
-            result = await stage_gitleaks(
-                repo=repo,
-                clone_path=clone_path,
-                output_dir=output_dir,
-                timeout=self.config.gitleaks_timeout,
+            await self.db.mark_repo_cloned(
+                repo_id,
+                clone_path=clone_result.metadata["clone_path"],
+                commit_sha=clone_result.metadata["commit_sha"],
             )
-            await self._record(result)
+            logger.info(f"[clone] ✓ {repo.full_name}")
 
-            if result.success:
-                report_path_str = result.metadata.get("report_path")
-                findings: list[dict[str, Any]] = []
-                if report_path_str:
-                    try:
-                        raw = json.loads(Path(report_path_str).read_text())
-                        if isinstance(raw, list):
-                            findings = [item for item in raw if isinstance(item, dict)]
-                    except Exception:
-                        pass
-
-                repo_id = _repo_id(repo)
-                scan_id = await self.db.save_gitleaks_scan(
-                    repo_id=repo_id,
-                    commit_sha=clone_result.metadata.get("commit_sha"),
-                    report_path=report_path_str,
-                    findings_count=len(findings),
-                )
-                if findings:
-                    await self.db.save_gitleaks_findings(scan_id, repo_id, findings)
-                logger.info(
-                    f"[gitleaks] ✓ {clone_result.repo_full_name} — {len(findings)} findings"
-                )
-            else:
-                logger.warning(f"[gitleaks] ✗ {clone_result.repo_full_name}: {result.error}")
-
-    async def _worker_sbom(
-        self,
-        in_q: asyncio.Queue[StageResult | None],
-        out_grype: asyncio.Queue[StageResult | None],
-        out_codeql: asyncio.Queue[StageResult | None],
-    ) -> None:
-        while True:
-            clone_result: StageResult | None = await in_q.get()
-            if clone_result is _DONE:
-                break
-
-            repo = await self.db.get_repo_by_id(clone_result.repo_id)
             clone_path = Path(clone_result.metadata["clone_path"])
-            output_dir = self.config.output_root / repo.name / "sbom"
+            commit_sha: str | None = clone_result.metadata.get("commit_sha")
 
-            logger.info(f"[sbom] → {clone_result.repo_full_name}")
-            result = await stage_sbom(
-                repo=repo,
-                clone_path=clone_path,
-                output_dir=output_dir,
-                timeout=self.config.sbom_timeout,
+            # Etapas paralelas: Gitleaks + SBOM
+            _, sbom_result = await asyncio.gather(
+                self._run_gitleaks(repo, clone_path, commit_sha),
+                self._run_sbom(repo, clone_path),
             )
-            await self._record(result)
 
-            if result.success:
-                sbom_path_str = result.metadata.get("sbom_path")
-                components: list[dict[str, Any]] = []
-                if sbom_path_str:
-                    try:
-                        sbom_data = json.loads(Path(sbom_path_str).read_text())
-                        raw_components = sbom_data.get("components", [])
-                        if isinstance(raw_components, list):
-                            components = [item for item in raw_components if isinstance(item, dict)]
-                    except Exception:
-                        pass
+            if not sbom_result.success:
+                return
 
-                repo_id = _repo_id(repo)
-                scan_id = await self.db.save_sbom_scan(
-                    repo_id=repo_id,
-                    sbom_path=sbom_path_str,
-                    component_count=len(components),
-                )
-                if components:
-                    await self.db.save_sbom_components(scan_id, repo_id, components)
-                await out_grype.put(result)
-                await out_codeql.put(result)
-                logger.info(
-                    f"[sbom] ✓ {clone_result.repo_full_name} — {len(components)} componentes"
-                )
-            else:
-                logger.warning(f"[sbom] ✗ {clone_result.repo_full_name}: {result.error}")
-
-    async def _worker_grype(self, in_q: asyncio.Queue[StageResult | None]) -> None:
-        while True:
-            sbom_result: StageResult | None = await in_q.get()
-            if sbom_result is _DONE:
-                break
-
-            repo = await self.db.get_repo_by_id(sbom_result.repo_id)
             sbom_path = Path(sbom_result.metadata["sbom_path"])
-            output_dir = self.config.output_root / repo.name / "grype"
 
-            logger.info(f"[grype] → {sbom_result.repo_full_name}")
-            result = await stage_grype(
-                repo=repo,
-                sbom_path=sbom_path,
-                output_dir=output_dir,
-                timeout=self.config.grype_timeout,
+            # Etapas paralelas: Grype + CodeQL
+            await asyncio.gather(
+                self._run_grype(repo, sbom_path),
+                self._run_codeql(repo, clone_path),
             )
-            await self._record(result)
 
-            if result.success:
-                report_path_str = result.metadata.get("report_path")
-                matches: list[dict[str, Any]] = []
-                if report_path_str:
-                    try:
-                        grype_data = json.loads(Path(report_path_str).read_text())
-                        raw_matches = grype_data.get("matches", [])
-                        if isinstance(raw_matches, list):
-                            matches = [item for item in raw_matches if isinstance(item, dict)]
-                    except Exception:
-                        pass
+    async def _run_gitleaks(
+        self, repo: Repository, clone_path: Path, commit_sha: str | None
+    ) -> StageResult:
+        output_dir = self.config.output_root / repo.name / "gitleaks"
+        logger.info(f"[gitleaks] → {repo.full_name}")
+        result = await stage_gitleaks(
+            repo=repo, clone_path=clone_path, output_dir=output_dir,
+            timeout=self.config.gitleaks_timeout,
+        )
+        await self._record(result)
 
-                critical = sum(
-                    1 for m in matches
-                    if m.get("vulnerability", {}).get("severity", "").lower() == "critical"
-                )
-                repo_id = _repo_id(repo)
-                scan_id = await self.db.save_grype_scan(
-                    repo_id=repo_id,
-                    report_path=report_path_str,
-                    findings_count=len(matches),
-                )
-                if matches:
-                    await self.db.save_grype_findings(scan_id, repo_id, matches)
-                logger.info(
-                    f"[grype] ✓ {sbom_result.repo_full_name} — "
-                    f"{len(matches)} vulns ({critical} críticas)"
-                )
-            else:
-                logger.warning(f"[grype] ✗ {sbom_result.repo_full_name}: {result.error}")
-
-    async def _worker_codeql(self, in_q: asyncio.Queue[StageResult | None]) -> None:
-        while True:
-            sbom_result: StageResult | None = await in_q.get()
-            if sbom_result is _DONE:
-                break
-
-            repo = await self.db.get_repo_by_id(sbom_result.repo_id)
-            clone_path = self.config.clone_root / repo.org_name / repo.name
-            output_dir = self.config.output_root / repo.name / "codeql"
-
-            logger.info(f"[codeql] → {sbom_result.repo_full_name}")
-            result = await stage_codeql(
-                repo=repo,
-                clone_path=clone_path,
-                output_dir=output_dir,
-                timeout=self.config.codeql_timeout,
+        if result.success:
+            report_path_str = result.metadata.get("report_path")
+            findings: list[dict[str, Any]] = []
+            if report_path_str:
+                try:
+                    raw = json.loads(Path(report_path_str).read_text())
+                    if isinstance(raw, list):
+                        findings = [item for item in raw if isinstance(item, dict)]
+                except Exception:
+                    pass
+            repo_id = _repo_id(repo)
+            scan_id = await self.db.save_gitleaks_scan(
+                repo_id=repo_id, commit_sha=commit_sha,
+                report_path=report_path_str, findings_count=len(findings),
             )
-            await self._record(result)
+            if findings:
+                await self.db.save_gitleaks_findings(scan_id, repo_id, findings)
+            logger.info(f"[gitleaks] ✓ {repo.full_name} — {len(findings)} findings")
+        else:
+            logger.warning(f"[gitleaks] ✗ {repo.full_name}: {result.error}")
 
-            if result.success and not result.metadata.get("skipped"):
-                results_path_str = result.metadata.get("results_path")
-                codeql_results: list[dict[str, Any]] = []
-                rules_by_id: dict[str, dict[str, Any]] = {}
-                if results_path_str:
-                    try:
-                        sarif = json.loads(Path(results_path_str).read_text())
-                        for run in sarif.get("runs", []):
-                            if not isinstance(run, Mapping):
+        return result
+
+    async def _run_sbom(self, repo: Repository, clone_path: Path) -> StageResult:
+        output_dir = self.config.output_root / repo.name / "sbom"
+        logger.info(f"[sbom] → {repo.full_name}")
+        result = await stage_sbom(
+            repo=repo, clone_path=clone_path, output_dir=output_dir,
+            timeout=self.config.sbom_timeout,
+        )
+        await self._record(result)
+
+        if result.success:
+            sbom_path_str = result.metadata.get("sbom_path")
+            components: list[dict[str, Any]] = []
+            if sbom_path_str:
+                try:
+                    sbom_data = json.loads(Path(sbom_path_str).read_text())
+                    raw_components = sbom_data.get("components", [])
+                    if isinstance(raw_components, list):
+                        components = [item for item in raw_components if isinstance(item, dict)]
+                except Exception:
+                    pass
+            repo_id = _repo_id(repo)
+            scan_id = await self.db.save_sbom_scan(
+                repo_id=repo_id, sbom_path=sbom_path_str, component_count=len(components),
+            )
+            if components:
+                await self.db.save_sbom_components(scan_id, repo_id, components)
+            logger.info(f"[sbom] ✓ {repo.full_name} — {len(components)} componentes")
+        else:
+            logger.warning(f"[sbom] ✗ {repo.full_name}: {result.error}")
+
+        return result
+
+    async def _run_grype(self, repo: Repository, sbom_path: Path) -> None:
+        output_dir = self.config.output_root / repo.name / "grype"
+        logger.info(f"[grype] → {repo.full_name}")
+        result = await stage_grype(
+            repo=repo, sbom_path=sbom_path, output_dir=output_dir,
+            timeout=self.config.grype_timeout,
+        )
+        await self._record(result)
+
+        if result.success:
+            report_path_str = result.metadata.get("report_path")
+            matches: list[dict[str, Any]] = []
+            if report_path_str:
+                try:
+                    grype_data = json.loads(Path(report_path_str).read_text())
+                    raw_matches = grype_data.get("matches", [])
+                    if isinstance(raw_matches, list):
+                        matches = [item for item in raw_matches if isinstance(item, dict)]
+                except Exception:
+                    pass
+            critical = sum(
+                1 for m in matches
+                if m.get("vulnerability", {}).get("severity", "").lower() == "critical"
+            )
+            repo_id = _repo_id(repo)
+            scan_id = await self.db.save_grype_scan(
+                repo_id=repo_id, report_path=report_path_str, findings_count=len(matches),
+            )
+            if matches:
+                await self.db.save_grype_findings(scan_id, repo_id, matches)
+            logger.info(
+                f"[grype] ✓ {repo.full_name} — {len(matches)} vulns ({critical} críticas)"
+            )
+        else:
+            logger.warning(f"[grype] ✗ {repo.full_name}: {result.error}")
+
+    async def _run_codeql(self, repo: Repository, clone_path: Path) -> None:
+        output_dir = self.config.output_root / repo.name / "codeql"
+        logger.info(f"[codeql] → {repo.full_name}")
+        result = await stage_codeql(
+            repo=repo, clone_path=clone_path, output_dir=output_dir,
+            timeout=self.config.codeql_timeout,
+        )
+        await self._record(result)
+
+        if result.success and not result.metadata.get("skipped"):
+            results_path_str = result.metadata.get("results_path")
+            codeql_results: list[dict[str, Any]] = []
+            rules_by_id: dict[str, dict[str, Any]] = {}
+            if results_path_str:
+                try:
+                    sarif = json.loads(Path(results_path_str).read_text())
+                    for run in sarif.get("runs", []):
+                        if not isinstance(run, Mapping):
+                            continue
+                        for rule in run.get("tool", {}).get("driver", {}).get("rules", []):
+                            if not isinstance(rule, dict) or "id" not in rule:
                                 continue
-                            for rule in run.get("tool", {}).get("driver", {}).get("rules", []):
-                                if not isinstance(rule, dict) or "id" not in rule:
-                                    continue
-                                rules_by_id[rule["id"]] = rule
-                            raw_results = run.get("results", [])
-                            if isinstance(raw_results, list):
-                                codeql_results.extend(
-                                    item for item in raw_results if isinstance(item, dict)
-                                )
-                    except Exception:
-                        pass
-
-                repo_id = _repo_id(repo)
-                scan_id = await self.db.save_codeql_scan(
-                    repo_id=repo_id,
-                    language=result.metadata.get("language"),
-                    report_path=results_path_str,
-                    findings_count=len(codeql_results),
-                )
-                if codeql_results:
-                    await self.db.save_codeql_findings(
-                        scan_id, repo_id, codeql_results, rules_by_id
-                    )
-                logger.info(
-                    f"[codeql] ✓ {sbom_result.repo_full_name} — "
-                    f"{len(codeql_results)} findings"
-                )
-            elif result.metadata.get("skipped"):
-                logger.info(
-                    f"[codeql] ⊘ {sbom_result.repo_full_name}: "
-                    f"{result.metadata.get('reason')}"
-                )
-            else:
-                logger.warning(f"[codeql] ✗ {sbom_result.repo_full_name}: {result.error}")
+                            rules_by_id[rule["id"]] = rule
+                        raw_results = run.get("results", [])
+                        if isinstance(raw_results, list):
+                            codeql_results.extend(
+                                item for item in raw_results if isinstance(item, dict)
+                            )
+                except Exception:
+                    pass
+            repo_id = _repo_id(repo)
+            scan_id = await self.db.save_codeql_scan(
+                repo_id=repo_id, language=result.metadata.get("language"),
+                report_path=results_path_str, findings_count=len(codeql_results),
+            )
+            if codeql_results:
+                await self.db.save_codeql_findings(scan_id, repo_id, codeql_results, rules_by_id)
+            logger.info(f"[codeql] ✓ {repo.full_name} — {len(codeql_results)} findings")
+        elif result.metadata.get("skipped"):
+            logger.info(f"[codeql] ⊘ {repo.full_name}: {result.metadata.get('reason')}")
+        else:
+            logger.warning(f"[codeql] ✗ {repo.full_name}: {result.error}")
 
     async def _record(self, result: StageResult) -> None:
         async with self._lock:
