@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3 *)",
       "Bash(python *)",
-      "Bash(pip show *)"
+      "Bash(pip show *)",
+      "Bash(awk -F',' '{print $1\",\"$2\",\"$3}')"
     ]
   }
 }

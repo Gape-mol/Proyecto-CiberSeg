@@ -8,7 +8,7 @@
 
 # Repos clonados y reportes generados — pueden ser GBs
 data/
-
+.claude
 # Python
 __pycache__/
 *.py[cod]

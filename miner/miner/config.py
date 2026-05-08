@@ -13,10 +13,11 @@ class MinerConfig:
     clone_root: Path
     db_path: str
 
+    use_dataset: bool = True
     clone_workers: int = 5
     skip_archived: bool = False
     visibility: str = "all"
-    clone_timeout: int = 600
+    clone_timeout: int = 1800
     clone_depth: int | None = None
     repo_limit: int = 50
     repo_recent_days: int = 30
@@ -36,12 +37,13 @@ class MinerConfig:
         return cls(
             github_token=token,
             org_name=org,
+            use_dataset=os.environ.get("USE_AIDEV_DATASET", "true").lower() == "true",
             clone_root=Path(os.environ.get("CLONE_ROOT", "/data/repos")),
             db_path=os.environ.get("DB_PATH", "/data/secpipeline.json"),
             clone_workers=int(os.environ.get("CLONE_WORKERS", "5")),
             skip_archived=os.environ.get("SKIP_ARCHIVED", "false").lower() == "true",
             visibility=os.environ.get("REPO_VISIBILITY", "all"),
-            clone_timeout=int(os.environ.get("CLONE_TIMEOUT", "600")),
+            clone_timeout=int(os.environ.get("CLONE_TIMEOUT", "1800")),
             clone_depth=_parse_depth(os.environ.get("CLONE_DEPTH")),
             repo_limit=int(os.environ.get("REPO_LIMIT", "50")),
             repo_recent_days=int(os.environ.get("REPO_RECENT_DAYS", "30")),

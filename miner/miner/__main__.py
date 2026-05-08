@@ -146,6 +146,34 @@ Ejemplos:
     return parser.parse_args()
 
 
+async def ensure_grype_db() -> None:
+    """Actualiza la base de vulnerabilidades de Grype si está desactualizada."""
+    import shutil
+    logger = logging.getLogger("miner.cli")
+
+    if not shutil.which("grype"):
+        logger.warning("grype no encontrado en PATH — se omite actualización de DB")
+        return
+
+    logger.info("Verificando base de vulnerabilidades de Grype…")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "grype", "db", "update",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        out = (stdout + stderr).decode(errors="replace").strip()
+        if proc.returncode == 0:
+            logger.info(f"Grype DB actualizada correctamente. {out.splitlines()[-1] if out else ''}")
+        else:
+            logger.warning(f"grype db update salió con rc={proc.returncode}: {out[:300]}")
+    except asyncio.TimeoutError:
+        logger.warning("grype db update tardó más de 5 min — continuando sin actualizar")
+    except Exception as e:
+        logger.warning(f"No se pudo actualizar la DB de Grype: {e}")
+
+
 async def run_pipeline_once(
     config: MinerConfig,
     output_json: Path | None,
@@ -174,10 +202,6 @@ async def run_pipeline_once(
             sbom_workers=int(os.environ.get("SBOM_WORKERS", "2")),
             grype_workers=int(os.environ.get("GRYPE_WORKERS", "2")),
             codeql_workers=int(os.environ.get("CODEQL_WORKERS", "2")),
-            gitleaks_timeout=int(os.environ.get("GITLEAKS_TIMEOUT", "300")),
-            sbom_timeout=int(os.environ.get("SBOM_TIMEOUT", "180")),
-            grype_timeout=int(os.environ.get("GRYPE_TIMEOUT", "180")),
-            codeql_timeout=int(os.environ.get("CODEQL_TIMEOUT", "1800")),
         )
 
         pipeline = Pipeline(config=pipeline_config, db=db)
@@ -304,6 +328,8 @@ async def main() -> int:
     except Exception as e:
         logger.error(str(e))
         return 1
+
+    await ensure_grype_db()
 
     try:
         if not config.continuous:

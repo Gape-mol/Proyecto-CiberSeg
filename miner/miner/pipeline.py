@@ -20,7 +20,7 @@ from .store import JsonStore
 logger = logging.getLogger(__name__)
 
 
-# Holds configuration values for pipeline workers and timeouts.
+# Holds configuration values for pipeline workers.
 @dataclass
 class PipelineConfig:
     clone_root: Path
@@ -33,11 +33,7 @@ class PipelineConfig:
     grype_workers: int = 1
     codeql_workers: int = 1
 
-    clone_timeout: int = 600
-    gitleaks_timeout: int = 300
-    sbom_timeout: int = 180
-    grype_timeout: int = 180
-    codeql_timeout: int = 1800
+    clone_timeout: int = 1800
 
     clone_depth: int | None = None
 
@@ -136,7 +132,6 @@ class Pipeline:
                 repo=repo,
                 clone_path=clone_path,
                 output_dir=output_dir,
-                timeout=self.config.gitleaks_timeout,
             )
         await self._record(result)
 
@@ -183,7 +178,6 @@ class Pipeline:
                 repo=repo,
                 clone_path=clone_path,
                 output_dir=output_dir,
-                timeout=self.config.sbom_timeout,
             )
         await self._record(result)
 
@@ -226,7 +220,6 @@ class Pipeline:
                 repo=repo,
                 sbom_path=sbom_path,
                 output_dir=output_dir,
-                timeout=self.config.grype_timeout,
             )
         await self._record(result)
 
@@ -284,7 +277,6 @@ class Pipeline:
                 repo=repo,
                 clone_path=clone_path,
                 output_dir=output_dir,
-                timeout=self.config.codeql_timeout,
             )
         await self._record(result)
 

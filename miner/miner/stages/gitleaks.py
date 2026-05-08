@@ -17,7 +17,6 @@ async def stage_gitleaks(
     repo: Repository,
     clone_path: Path,
     output_dir: Path,
-    timeout: int = 300,
 ) -> StageResult:
     repo_id_value = repo_id(repo)
     if not shutil.which("gitleaks"):
@@ -53,7 +52,7 @@ async def stage_gitleaks(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        _, stderr = await proc.communicate()
         duration = asyncio.get_event_loop().time() - t0
 
         findings_count = 0
@@ -77,14 +76,6 @@ async def stage_gitleaks(
             },
         )
 
-    except TimeoutError:
-        return StageResult(
-            repo_id=repo_id_value,
-            repo_full_name=repo.full_name,
-            stage="gitleaks",
-            success=False,
-            error=f"Timeout despues de {timeout}s",
-        )
     except Exception as e:
         return StageResult(
             repo_id=repo_id_value,

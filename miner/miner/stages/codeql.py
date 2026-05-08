@@ -25,7 +25,7 @@ CODEQL_LANGUAGE_MAP = {
     "C++": "cpp",
 }
 
-_CODEQL_NO_BUILD = {"javascript", "python", "ruby"}
+_CODEQL_NO_BUILD = {"javascript", "python", "ruby", "csharp", "java", "go", "cpp"}
 
 
 # Runs CodeQL analysis for supported languages and returns a stage result.
@@ -33,7 +33,6 @@ async def stage_codeql(
     repo: Repository,
     clone_path: Path,
     output_dir: Path,
-    timeout: int = 1800,
 ) -> StageResult:
     repo_id_value = repo_id(repo)
     if not shutil.which("codeql"):

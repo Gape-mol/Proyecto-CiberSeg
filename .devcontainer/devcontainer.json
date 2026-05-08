@@ -71,8 +71,8 @@
   // Reenvío de puertos
   "forwardPorts": [4173, 8888],
   "portsAttributes": {
-    "4173": { "label": "Visualizer", "onAutoForward": "notify" },
-    "8888": { "label": "Jupyter Lab", "onAutoForward": "notify" }
+    "4173": { "label": "Visualizer", "onAutoForward": "notify", "visibility": "public" },
+    "8888": { "label": "Jupyter Lab", "onAutoForward": "notify", "visibility": "public" }
   },
 
   "remoteUser": "vscode"

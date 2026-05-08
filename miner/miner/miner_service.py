@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .dataset import iter_org_repos
 from .git import GitHubClient
 from .models import Organization, Repository
 from .store import JsonStore
@@ -42,13 +43,49 @@ class GitHubMiner:
         }
         return summary, repos
 
-    # Collects repositories based on recency and popularity rules.
+    # Collects repositories from the AIDev dataset or GitHub API depending on config.
     async def _collect_repos(self, org: Organization) -> list[Repository]:
+        assert org.id is not None
+        if self.config.use_dataset:
+            return await self._collect_repos_from_dataset(org)
+        return await self._collect_repos_from_api(org)
+
+    async def _collect_repos_from_dataset(self, org: Organization) -> list[Repository]:
+        assert org.id is not None
+        logger.info(f"Buscando repos de '{org.name}' en el dataset AIDev…")
+
+        all_repos: list[Repository] = []
+        seen: set[str] = set()
+        for row in iter_org_repos(org.name):
+            full_name = (row.get("full_name") or "").strip()
+            if full_name in seen:
+                continue
+            seen.add(full_name)
+            if self.config.skip_archived and row.get("archived"):
+                logger.debug(f"Saltando repo archivado: {full_name}")
+                continue
+            all_repos.append(Repository.from_dataset(row, org_id=org.id))
+
+        selected = sorted(all_repos, key=lambda r: r.stars, reverse=True)[: self.config.repo_limit]
+
+        logger.info(
+            f"Repos en dataset para '{org.name}': {len(all_repos)} | "
+            f"seleccionados (top stars): {len(selected)}"
+        )
+
+        repos: list[Repository] = []
+        for repo in selected:
+            repo = await self.db.upsert_repository(repo)
+            repos.append(repo)
+        return repos
+
+    async def _collect_repos_from_api(self, org: Organization) -> list[Repository]:
+        assert org.id is not None
         all_repos: list[Repository] = []
 
         fetch_limit = self.config.repo_limit * 4
         logger.info(
-            f"Listando repositorios de '{org.name}'… "
+            f"Listando repositorios de '{org.name}' via GitHub API… "
             f"(trayendo hasta {fetch_limit} más recientes, límite final: {self.config.repo_limit})"
         )
         async for repo_data in self.client.list_org_repos(
@@ -57,7 +94,6 @@ class GitHubMiner:
             if self.config.skip_archived and repo_data.get("archived"):
                 logger.debug(f"Saltando repo archivado: {repo_data['full_name']}")
                 continue
-            assert org.id is not None
             all_repos.append(Repository.from_api(repo_data, org_id=org.id))
             n = len(all_repos)
             if n % 25 == 0:

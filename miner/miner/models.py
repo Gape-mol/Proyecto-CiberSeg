@@ -72,3 +72,27 @@ class Repository:
             github_created_at=_parse_dt(data.get("created_at")),
             github_updated_at=_parse_dt(data.get("updated_at")),
         )
+
+    @classmethod
+    def from_dataset(cls, row: dict[str, Any], org_id: int) -> Repository:
+        """Constructs a Repository from an AIDev HuggingFace dataset row."""
+        full_name: str = (row.get("full_name") or "").strip()
+        name = full_name.split("/")[-1] if "/" in full_name else full_name
+        clone_url = row.get("clone_url") or f"https://github.com/{full_name}.git"
+        return cls(
+            org_id=org_id,
+            name=name,
+            full_name=full_name,
+            clone_url=clone_url,
+            default_branch=row.get("default_branch") or "main",
+            description=row.get("description"),
+            language=row.get("language"),
+            visibility=row.get("visibility") or "public",
+            archived=bool(row.get("archived", False)),
+            stars=int(row.get("stargazers_count") or row.get("stars") or 0),
+            forks=int(row.get("forks_count") or row.get("forks") or 0),
+            size_kb=int(row.get("size") or 0),
+            last_commit_at=_parse_dt(row.get("pushed_at")),
+            github_created_at=_parse_dt(row.get("created_at")),
+            github_updated_at=_parse_dt(row.get("updated_at")),
+        )
